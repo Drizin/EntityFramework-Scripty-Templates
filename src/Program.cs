@@ -26,6 +26,13 @@ namespace EntityFramework_Scripty_Templates
     {
         static void Main(string[] args)
         {
+            //var eng = EFReversePOCOGenerator.CreateFakeDebugGenerator
+            //    (
+            //    connectionString: @"Data Source=LENOVOFLEX5\SQLEXPRESS;Initial Catalog=northwind;Integrated Security=True;Application Name=EntityFramework Reverse POCO Generator",
+            //    providerName: "System.Data.SqlClient",
+            //    targetFrameworkVersion: 4.6m
+            //    );
+            //eng.OutputProjectStructure().Wait();
 
             RunAllTemplates();
 
@@ -35,7 +42,7 @@ namespace EntityFramework_Scripty_Templates
             Console.WriteLine(string.Format("1) Download Scripty at https://github.com/daveaglick/Scripty"));
             Console.WriteLine(string.Format("2) Build it"));
             Console.WriteLine(string.Format("3) Run {0} YourCsProj.csproj GenerateEFModel.csx", @"Scripty\src\Scripty\bin\Debug\Scripty.exe"));
-            Console.ReadLine();
+            //Console.ReadLine();
         }
 
         static void FindAndRunTemplate()
@@ -59,7 +66,7 @@ namespace EntityFramework_Scripty_Templates
             #endregion
             var scripty = new Scripty.Core.ScriptEngine(csProj);
             var result = scripty.Evaluate(new Scripty.Core.ScriptSource(csx, File.ReadAllText(csx))).Result;
-        }
+            }
 
         static void RunAllTemplates()
         {

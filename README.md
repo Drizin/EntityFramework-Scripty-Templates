@@ -30,6 +30,7 @@ to configure those templates to be automatically executed inside your project.
 
 ## History
 - 2019-06-29: Copied reverse engineer classes from EntityFramework-Reverse-POCO-Code-First-Generator, removed T4 and Visual Studio dependencies, and ported to Scripty. (This is my first Scripty template!)
+- 2019-06-30: Finished migration of POCO/DbContext scripts. Identical to the originals.
 
 ## Credits
 - Simon Hughes for his amazing [T4 templates](https://github.com/sjh37/EntityFramework-Reverse-POCO-Code-First-Generator)

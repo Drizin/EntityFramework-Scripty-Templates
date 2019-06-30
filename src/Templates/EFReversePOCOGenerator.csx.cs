@@ -15,21 +15,2032 @@ namespace EntityFramework_Scripty_Templates
 {
     public class EFReversePOCOGenerator
     {
+        private EFReversePOCOGenerator() { }
         public EFReversePOCOGenerator(ScriptContext context, string connectionString, string providerName, decimal targetFrameworkVersion)
         {
             this._context = context;
-            this._output = context.Output;
 
             Settings.ConnectionString = connectionString;
             Settings.ProviderName = providerName;
             Settings.TargetFrameworkVersion = targetFrameworkVersion;
         }
+        public static EFReversePOCOGenerator CreateFakeDebugGenerator(string connectionString, string providerName, decimal targetFrameworkVersion)
+        {
+            Settings.ConnectionString = connectionString;
+            Settings.ProviderName = providerName;
+            Settings.TargetFrameworkVersion = targetFrameworkVersion;
+            return new EFReversePOCOGenerator();
+        }
 
         private readonly ScriptContext _context;
-        private readonly Scripty.Core.Output.OutputFileCollection _output;
+        private Scripty.Core.Output.OutputFile _output;
+
+        #region Configurable Callback methods
+        Action<Scripty.Core.Output.OutputFile, Table> WritePocoClassAttributes;
+        Action<Scripty.Core.Output.OutputFile, Table> WritePocoClassExtendedComments;
+        Action<Scripty.Core.Output.OutputFile, Table> WritePocoBaseClasses;
+        Action<Scripty.Core.Output.OutputFile, Table> WritePocoBaseClassBody;
+        Action<Scripty.Core.Output.OutputFile, Column> WritePocoColumn;
+        #endregion
+
+        public void Configure()
+        {
+            #region All this code mostly came from Simon Hughes T4 templates (with minor adjustments) - Database.tt - see https://github.com/sjh37/EntityFramework-Reverse-POCO-Code-First-Generator
+            // v2.37.4
+            // Please make changes to the settings below.
+            // All you have to do is save this file, and the output file(s) is/are generated. Compiling does not regenerate the file(s).
+            // A course for this generator is available on Pluralsight at https://www.pluralsight.com/courses/code-first-entity-framework-legacy-databases
+
+            // Main settings **********************************************************************************************************************
+            Settings.ConnectionStringName = "MyDbContext";   // Searches for this connection string in config files listed below in the ConfigFilenameSearchOrder setting
+                                                             // ConnectionStringName is the only required setting.
+            Settings.CommandTimeout = 600; // SQL Command timeout in seconds. 600 is 10 minutes, 0 will wait indefinately. Some databases can be slow retrieving schema information.
+                                           // As an alternative to ConnectionStringName above, which must match your app/web.config connection string name, you can override them below
+                                           // Settings.ConnectionString = "Data Source=(local);Initial Catalog=Northwind;Integrated Security=True;Application Name=EntityFramework Reverse POCO Generator";
+                                           // Settings.ProviderName = "System.Data.SqlClient";
+
+            Settings.Namespace = "EntityFramework_Reverse_POCO_Generator"; // Override the default namespace here
+            Settings.DbContextName = "MyDbContext"; // Note: If generating separate files, please give the db context a different name from this tt filename.
+                                                    //Settings.DbContextInterfaceName = "IMyDbContext"; // Defaults to "I" + DbContextName or set string empty to not implement any interface.
+            Settings.DbContextInterfaceBaseClasses = "System.IDisposable";    // Specify what the base classes are for your database context interface
+            Settings.DbContextBaseClass = "System.Data.Entity.DbContext";   // Specify what the base class is for your DbContext. For ASP.NET Identity use "Microsoft.AspNet.Identity.EntityFramework.IdentityDbContext<Microsoft.AspNet.Identity.EntityFramework.IdentityUser>";
+            Settings.AddParameterlessConstructorToDbContext = true; // If true, then DbContext will have a default (parameterless) constructor which automatically passes in the connection string name, if false then no parameterless constructor will be created.
+                                                                    //Settings.DefaultConstructorArgument = null; // Defaults to "Name=" + ConnectionStringName, use null in order not to call the base constructor
+            Settings.ConfigurationClassName = "Configuration"; // Configuration, Mapping, Map, etc. This is appended to the Poco class name to configure the mappings.
+            Settings.FilenameSearchOrder = new[] { "app.config", "web.config" }; // Add more here if required. The config files are searched for in the local project first, then the whole solution second.
+            Settings.GenerateSeparateFiles = false;
+            Settings.EntityClassesModifiers = "public"; // "public partial";
+            Settings.ConfigurationClassesModifiers = "public"; // "public partial";
+            Settings.DbContextClassModifiers = "public"; // "public partial";
+            Settings.DbContextInterfaceModifiers = "public"; // "public partial";
+            Settings.MigrationClassModifiers = "internal sealed";
+            Settings.ResultClassModifiers = "public"; // "public partial";
+            Settings.UseMappingTables = true; // If true, mapping will be used and no mapping tables will be generated. If false, all tables will be generated.
+            Settings.UsePascalCase = true;    // This will rename the generated C# tables & properties to use PascalCase. If false table & property names will be left alone.
+            Settings.UseDataAnnotations = false; // If true, will add data annotations to the poco classes.
+            Settings.UseDataAnnotationsWithFluent = false; // If true, then non-Entity Framework-specific DataAnnotations (like [Required] and [StringLength]) will be applied to Entities even if UseDataAnnotations is false.
+            Settings.UsePropertyInitializers = false; // Removes POCO constructor and instead uses C# 6 property initialisers to set defaults
+            Settings.UseLazyLoading = true; // Marks all navigation properties as virtual or not, to support or disable EF Lazy Loading feature
+            Settings.UseInheritedBaseInterfaceFunctions = false; // If true, the main DBContext interface functions will come from the DBContextInterfaceBaseClasses and not generated. If false, the functions will be generated.
+            Settings.IncludeComments = CommentsStyle.AtEndOfField; // Adds comments to the generated code
+            Settings.IncludeExtendedPropertyComments = CommentsStyle.InSummaryBlock; // Adds extended properties as comments to the generated code
+            Settings.IncludeConnectionSettingComments = true; // Add comments describing connection settings used to generate file
+            Settings.IncludeViews = true;
+            Settings.IncludeSynonyms = false;
+            Settings.IncludeStoredProcedures = true;
+            Settings.IncludeTableValuedFunctions = false; // If true, you must set IncludeStoredProcedures = true, and install the "EntityFramework.CodeFirstStoreFunctions" Nuget Package.
+            Settings.DisableGeographyTypes = false; // Turns off use of System.Data.Entity.Spatial.DbGeography and System.Data.Entity.Spatial.DbGeometry as OData doesn't support entities with geometry/geography types.
+                                                    //Settings.CollectionInterfaceType = "System.Collections.Generic.List"; // Determines the declaration type of collections for the Navigation Properties. ICollection is used if not set.
+            Settings.CollectionType = "System.Collections.Generic.List";  // Determines the type of collection for the Navigation Properties. "ObservableCollection" for example. Add "System.Collections.ObjectModel" to AdditionalNamespaces if setting the CollectionType = "ObservableCollection".
+            Settings.NullableShortHand = true; //true => T?, false => Nullable<T>
+            Settings.AddIDbContextFactory = true; // Will add a default IDbContextFactory<DbContextName> implementation for easy dependency injection
+            Settings.AddUnitTestingDbContext = true; // Will add a FakeDbContext and FakeDbSet for easy unit testing
+            Settings.IncludeQueryTraceOn9481Flag = false; // If SqlServer 2014 appears frozen / take a long time when this file is saved, try setting this to true (you will also need elevated privileges).
+            Settings.IncludeCodeGeneratedAttribute = true; // If true, will include the GeneratedCode attribute, false to remove it.
+            Settings.UsePrivateSetterForComputedColumns = true; // If the columns is computed, use a private setter.
+            Settings.AdditionalNamespaces = new[] { "" };  // To include extra namespaces, include them here. i.e. "Microsoft.AspNet.Identity.EntityFramework"
+            Settings.AdditionalContextInterfaceItems = new[] // To include extra db context interface items, include them here. Also set DbContextClassModifiers="public partial", and implement the partial DbContext class functions.
+            {
+        ""  //  example: "void SetAutoDetectChangesEnabled(bool flag);"
+    };
+            // If you need to serialize your entities with the JsonSerializer from Newtonsoft, this would serialize
+            // all properties including the Reverse Navigation and Foreign Keys. The simplest way to exclude them is
+            // to use the data annotation [JsonIgnore] on reverse navigation and foreign keys.
+            // For more control, take a look at ForeignKeyAnnotationsProcessing() further down
+            Settings.AdditionalReverseNavigationsDataAnnotations = new string[] // Data Annotations for all ReverseNavigationProperty.
+            {
+                // "JsonIgnore" // Also add "Newtonsoft.Json" to the AdditionalNamespaces array above
+            };
+            Settings.AdditionalForeignKeysDataAnnotations = new string[] // Data Annotations for all ForeignKeys.
+            {
+                // "JsonIgnore" // Also add "Newtonsoft.Json" to the AdditionalNamespaces array above
+            };
+            Settings.ColumnNameToDataAnnotation = new Dictionary<string, string>
+    {
+        // This is used when UseDataAnnotations == true or UseDataAnnotationsWithFluent == true;
+        // It is used to set a data annotation on a column based on the columns name.
+        // Make sure the column name is lowercase in the following array, regardless of how it is in the database
+        // Column name       DataAnnotation to add
+        { "email",           "EmailAddress" },
+        { "emailaddress",    "EmailAddress" },
+        { "creditcard",      "CreditCard" },
+        { "url",             "Url" },
+        { "fax",             "Phone" },
+        { "phone",           "Phone" },
+        { "phonenumber",     "Phone" },
+        { "mobile",          "Phone" },
+        { "mobilenumber",    "Phone" },
+        { "telephone",       "Phone" },
+        { "telephonenumber", "Phone" },
+        { "password",        "DataType(DataType.Password)" },
+        { "username",        "DataType(DataType.Text)" },
+        { "postcode",        "DataType(DataType.PostalCode)" },
+        { "postalcode",      "DataType(DataType.PostalCode)" },
+        { "zip",             "DataType(DataType.PostalCode)" },
+        { "zipcode",         "DataType(DataType.PostalCode)" }
+    };
+            Settings.ColumnTypeToDataAnnotation = new Dictionary<string, string>
+    {
+        // This is used when UseDataAnnotations == true or UseDataAnnotationsWithFluent == true;
+        // It is used to set a data annotation on a column based on the columns's MS SQL type.
+        // Make sure the column name is lowercase in the following array, regardless of how it is in the database
+        // Column name       DataAnnotation to add
+        { "date",            "DataType(DataType.Date)" },
+        { "datetime",        "DataType(DataType.DateTime)" },
+        { "datetime2",       "DataType(DataType.DateTime)" },
+        { "datetimeoffset",  "DataType(DataType.DateTime)" },
+        { "smallmoney",      "DataType(DataType.Currency)" },
+        { "money",           "DataType(DataType.Currency)" }
+    };
+
+            // Migrations *************************************************************************************************************************
+            Settings.MigrationConfigurationFileName = ""; // null or empty to not create migrations
+            Settings.MigrationStrategy = "MigrateDatabaseToLatestVersion"; // MigrateDatabaseToLatestVersion, CreateDatabaseIfNotExists or DropCreateDatabaseIfModelChanges
+            Settings.ContextKey = ""; // Sets the string used to distinguish migrations belonging to this configuration from migrations belonging to other configurations using the same database. This property enables migrations from multiple different models to be applied to applied to a single database.
+            Settings.AutomaticMigrationsEnabled = true;
+            Settings.AutomaticMigrationDataLossAllowed = true; // if true, can drop fields and lose data during automatic migration
+
+            // Pluralization **********************************************************************************************************************
+            // To turn off pluralization, use:
+            //      Inflector.PluralizationService = null;
+            // Default pluralization, use:
+            //      Inflector.PluralizationService = new EnglishPluralizationService();
+            // For Spanish pluralization:
+            //      1. Intall the "EF6.Contrib" Nuget Package.
+            //      2. Add the following to the top of this file and adjust path, and remove the space between the angle bracket and # at the beginning and end.
+            //         < #@ assembly name="your full path to \EntityFramework.Contrib.dll" # >
+            //      3. Change the line below to: Inflector.PluralizationService = new SpanishPluralizationService();
+            Inflector.PluralizationService = new EnglishPluralizationService();
+            // If pluralisation does not do the right thing, override it here by adding in a custom entry.
+            //Inflector.PluralizationService = new EnglishPluralizationService(new[]
+            //{
+            //    // Create custom ("Singular", "Plural") forms for one-off words as needed.
+            //    new CustomPluralizationEntry("Course", "Courses"),
+            //    new CustomPluralizationEntry("Status", "Status") // Use same value to prevent pluralisation
+            //});
 
 
-        #region All this code mostly came from Simon Hughes T4 templates (with minor adjustments) - see https://github.com/sjh37/EntityFramework-Reverse-POCO-Code-First-Generator
+            // Elements to generate ***************************************************************************************************************
+            // Add the elements that should be generated when the template is executed.
+            // Multiple projects can now be used that separate the different concerns.
+            Settings.ElementsToGenerate = Elements.Poco | Elements.Context | Elements.UnitOfWork | Elements.PocoConfiguration;
+
+            // Use these namespaces to specify where the different elements now live. These may even be in different assemblies.
+            // Please note this does not create the files in these locations, it only adds a using statement to say where they are.
+            // The way to do this is to add the "EntityFramework Reverse POCO Code First Generator" into each of these folders.
+            // Then set the .tt to only generate the relevant section you need by setting
+            //      ElementsToGenerate = Elements.Poco; in your Entity folder,
+            //      ElementsToGenerate = Elements.Context | Elements.UnitOfWork; in your Context folder,
+            //      ElementsToGenerate = Elements.PocoConfiguration; in your Maps folder.
+            //      PocoNamespace = "YourProject.Entities";
+            //      ContextNamespace = "YourProject.Context";
+            //      UnitOfWorkNamespace = "YourProject.Context";
+            //      PocoConfigurationNamespace = "YourProject.Maps";
+            // You also need to set the following to the namespace where they now live:
+            Settings.PocoNamespace = "";
+            Settings.ContextNamespace = "";
+            Settings.UnitOfWorkNamespace = "";
+            Settings.PocoConfigurationNamespace = "";
+
+
+            // Schema *****************************************************************************************************************************
+            // If there are multiple schemas, then the table name is prefixed with the schema, except for dbo.
+            // Ie. dbo.hello will be Hello.
+            //     abc.hello will be AbcHello.
+            Settings.PrependSchemaName = true;   // Control if the schema name is prepended to the table name
+
+            // Table Suffix ***********************************************************************************************************************
+            // Prepends the suffix to the generated classes names
+            // Ie. If TableSuffix is "Dto" then Order will be OrderDto
+            //     If TableSuffix is "Entity" then Order will be OrderEntity
+            Settings.TableSuffix = null;
+
+            // Filtering **************************************************************************************************************************
+            // Use the following table/view name regex filters to include or exclude tables/views
+            // Exclude filters are checked first and tables matching filters are removed.
+            //  * If left null, none are excluded.
+            //  * If not null, any tables matching the regex are excluded.
+            // Include filters are checked second.
+            //  * If left null, all are included.
+            //  * If not null, only the tables matching the regex are included.
+            // For clarity: if you want to include all the customer tables, but not the customer billing tables.
+            //      TableFilterInclude = new Regex("^[Cc]ustomer.*"); // This includes all the customer and customer billing tables
+            //      TableFilterExclude = new Regex(".*[Bb]illing.*"); // This excludes all the billing tables
+            //
+            // Example:     TableFilterExclude = new Regex(".*auto.*");
+            //              TableFilterInclude = new Regex("(.*_FR_.*)|(data_.*)");
+            //              TableFilterInclude = new Regex("^table_name1$|^table_name2$|etc");
+            //              ColumnFilterExclude = new Regex("^FK_.*$");
+            Settings.SchemaFilterExclude = null;
+            Settings.SchemaFilterInclude = null;
+            Settings.TableFilterExclude = null;
+            Settings.TableFilterInclude = null;
+            Settings.ColumnFilterExclude = null;
+
+            // Filtering of tables using a function. This can be used in conjunction with the Regex's above.
+            // Regex are used first to filter the list down, then this function is run last.
+            // Return true to include the table, return false to exclude it.
+            Settings.TableFilter = (Table t) =>
+            {
+                // Example: Exclude any table in dbo schema with "order" in its name.
+                //if(t.Schema.Equals("dbo", StringComparison.InvariantCultureIgnoreCase) && t.NameHumanCase.ToLowerInvariant().Contains("order"))
+                //    return false;
+
+                return true;
+            };
+
+
+            // Stored Procedures ******************************************************************************************************************
+            // Use the following regex filters to include or exclude stored procedures
+            Settings.StoredProcedureFilterExclude = null;
+            Settings.StoredProcedureFilterInclude = null;
+
+            // Filtering of stored procedures using a function. This can be used in conjunction with the Regex's above.
+            // Regex are used first to filter the list down, then this function is run last.
+            // Return true to include the stored procedure, return false to exclude it.
+            Settings.StoredProcedureFilter = (StoredProcedure sp) =>
+            {
+                // Example: Exclude any stored procedure in dbo schema with "order" in its name.
+                //if(sp.Schema.Equals("dbo", StringComparison.InvariantCultureIgnoreCase) && sp.NameHumanCase.ToLowerInvariant().Contains("order"))
+                //    return false;
+
+                return true;
+            };
+
+
+            // Table renaming *********************************************************************************************************************
+            // Use the following function to rename tables such as tblOrders to Orders, Shipments_AB to Shipments, etc.
+            // Example:
+            Settings.TableRename = (string name, string schema, bool isView) =>
+            {
+                // Example
+                //if (name.StartsWith("tbl"))
+                //    name = name.Remove(0, 3);
+                //name = name.Replace("_AB", "");
+
+                //if(isView)
+                //    name = name + "View";
+
+                // If you turn pascal casing off (UsePascalCase = false), and use the pluralisation service, and some of your
+                // tables names are all UPPERCASE, some words ending in IES such as CATEGORIES get singularised as CATEGORy.
+                // Therefore you can make them lowercase by using the following
+                // return Inflector.MakeLowerIfAllCaps(name);
+
+                // If you are using the pluralisation service and you want to rename a table, make sure you rename the table to the plural form.
+                // For example, if the table is called Treez (with a z), and your pluralisation entry is
+                //     new CustomPluralizationEntry("Tree", "Trees")
+                // Use this TableRename function to rename Treez to the plural (not singular) form, Trees:
+                // if (name == "Treez") return "Trees";
+
+                return name;
+            };
+
+            // Mapping Table renaming *********************************************************************************************************************
+            // By default, name of the properties created relate to the table the foreign key points to and not the mapping table.
+            // Use the following function to rename the properties created by ManytoMany relationship tables especially if you have 2 relationships between the same tables.
+            // Example:
+            Settings.MappingTableRename = (string mappingtable, string tablename, string entityname) =>
+            {
+
+                // Examples:
+                // If you have two mapping tables such as one being UserRequiredSkills snd one being UserOptionalSkills, this would change the name of one property
+                // if (mappingtable == "UserRequiredSkills" and tablename == "User")
+                //    return "RequiredSkills";
+
+                // or if you want to give the same property name on both classes
+                // if (mappingtable == "UserRequiredSkills")
+                //    return "UserRequiredSkills";
+
+                return entityname;
+            };
+
+            // Column modification*****************************************************************************************************************
+            // Use the following list to replace column byte types with Enums.
+            // As long as the type can be mapped to your new type, all is well.
+            //Settings.EnumDefinitions.Add(new EnumDefinition { Schema = "dbo", Table = "match_table_name", Column = "match_column_name", EnumType = "name_of_enum" });
+            //Settings.EnumDefinitions.Add(new EnumDefinition { Schema = "dbo", Table = "OrderHeader", Column = "OrderStatus", EnumType = "OrderStatusType" }); // This will replace OrderHeader.OrderStatus type to be an OrderStatusType enum
+
+            // Use the following function if you need to apply additional modifications to a column
+            // eg. normalise names etc.
+            Settings.UpdateColumn = (Column column, Table table) =>
+            {
+                // Rename column
+                //if (column.IsPrimaryKey && column.NameHumanCase == "PkId")
+                //    column.NameHumanCase = "Id";
+
+                // .IsConcurrencyToken() must be manually configured. However .IsRowVersion() can be automatically detected.
+                //if (table.NameHumanCase.Equals("SomeTable", StringComparison.InvariantCultureIgnoreCase) && column.NameHumanCase.Equals("SomeColumn", StringComparison.InvariantCultureIgnoreCase))
+                //    column.IsConcurrencyToken = true;
+
+                // Remove table name from primary key
+                //if (column.IsPrimaryKey && column.NameHumanCase.Equals(table.NameHumanCase + "Id", StringComparison.InvariantCultureIgnoreCase))
+                //    column.NameHumanCase = "Id";
+
+                // Remove column from poco class as it will be inherited from a base class
+                //if (column.IsPrimaryKey && table.NameHumanCase.Equals("SomeTable", StringComparison.InvariantCultureIgnoreCase))
+                //    column.Hidden = true;
+
+                // Use the extended properties to perform tasks to column
+                //if (column.ExtendedProperty == "HIDE")
+                //    column.Hidden = true;
+
+                // Apply the "override" access modifier to a specific column.
+                // if (column.NameHumanCase == "id")
+                //    column.OverrideModifier = true;
+                // This will create: public override long id { get; set; }
+
+                // Perform Enum property type replacement
+                var enumDefinition = Settings.EnumDefinitions.FirstOrDefault(e =>
+                    (e.Schema.Equals(table.Schema, StringComparison.InvariantCultureIgnoreCase)) &&
+                    (e.Table.Equals(table.Name, StringComparison.InvariantCultureIgnoreCase) || e.Table.Equals(table.NameHumanCase, StringComparison.InvariantCultureIgnoreCase)) &&
+                    (e.Column.Equals(column.Name, StringComparison.InvariantCultureIgnoreCase) || e.Column.Equals(column.NameHumanCase, StringComparison.InvariantCultureIgnoreCase)));
+
+                if (enumDefinition != null)
+                {
+                    column.PropertyType = enumDefinition.EnumType;
+                    if (!string.IsNullOrEmpty(column.Default))
+                        column.Default = "(" + enumDefinition.EnumType + ") " + column.Default;
+                }
+
+                return column;
+            };
+
+
+            // Using Views *****************************************************************************************************************
+            // SQL Server does not support the declaration of primary-keys in VIEWs. Entity Framework's EDMX designer (and this T4 template)
+            // assume that all non-null columns in a VIEW are primary-key columns, this will be incorrect for most non-trivial applications.
+            // This callback will be invoked for each VIEW found in the database. Use it to declare which columns participate in that VIEW's
+            // primary-key by setting 'IsPrimaryKey = true'.
+            // If no columns are marked with 'IsPrimaryKey = true' then this T4 template defaults to marking all non-NULL columns as primary key columns.
+            // To set-up Foreign-Key relationships between VIEWs and Tables (or even other VIEWs) use the 'AddForeignKeys' callback below.
+            Settings.ViewProcessing = (Table view) =>
+            {
+                // Below is example code for the Northwind database that configures the 'VIEW [Orders Qry]' and 'VIEW [Invoices]'
+                //switch(view.Name)
+                //{
+                //case "Orders Qry":
+                //    // VIEW [Orders Qry] uniquely identifies rows with the 'OrderID' column:
+                //    view.Columns.Single( col => col.Name == "OrderID" ).IsPrimaryKey = true;
+                //    break;
+                //case "Invoices":
+                //    // VIEW [Invoices] has a composite primary key (OrderID+ProductID), so both columns must be marked as a Primary Key:
+                //    foreach( Column col in view.Columns.Where( c => c.Name == "OrderID" || c.Name == "ProductID" ) ) col.IsPrimaryKey = true;
+                //    break;
+                //}
+            };
+
+            Settings.AddForeignKeys = (List<ForeignKey> foreignKeys, Tables tablesAndViews) =>
+            {
+                // In Northwind:
+                // [Orders] (Table) to [Invoices] (View) is one-to-many using Orders.OrderID = Invoices.OrderID
+                // [Order Details] (Table) to [Invoices] (View) is one-to-zeroOrOne - but uses a composite-key: ( [Order Details].OrderID,ProductID = [Invoices].OrderID,ProductID )
+                // [Orders] (Table) to [Orders Qry] (View) is one-to-zeroOrOne ( [Orders].OrderID = [Orders Qry].OrderID )
+
+                // AddRelationship is a helper function that creates ForeignKey objects and adds them to the foreignKeys list:
+                //AddRelationship( foreignKeys, tablesAndViews, "orders_to_invoices"      , "dbo", "Orders"       , "OrderID"                       , "dbo", "Invoices", "OrderID" );
+                //AddRelationship( foreignKeys, tablesAndViews, "orderDetails_to_invoices", "dbo", "Order Details", new[] { "OrderID", "ProductID" }, "dbo", "Invoices",  new[] { "OrderID", "ProductID" } );
+                //AddRelationship( foreignKeys, tablesAndViews, "orders_to_ordersQry"     , "dbo", "Orders"       , "OrderID"                       , "dbo", "Orders Qry", "OrderID" );
+            };
+
+            // StoredProcedure renaming ************************************************************************************************************
+            // Use the following function to rename stored procs such as sp_CreateOrderHistory to CreateOrderHistory, my_sp_shipments to Shipments, etc.
+            // Example:
+            /*Settings.StoredProcedureRename = (sp) =>
+            {
+                if (sp.NameHumanCase.StartsWith("sp_"))
+                    return sp.NameHumanCase.Remove(0, 3);
+                return sp.NameHumanCase.Replace("my_sp_", "");
+            };*/
+            Settings.StoredProcedureRename = (sp) => sp.NameHumanCase;   // Do nothing by default
+
+            // Use the following function to rename the return model automatically generated for stored procedure.
+            // By default it's <proc_name>ReturnModel.
+            // Example:
+            /*Settings.StoredProcedureReturnModelRename = (name, sp) =>
+            {
+                if (sp.NameHumanCase.Equals("ComputeValuesForDate", StringComparison.InvariantCultureIgnoreCase))
+                    return "ValueSet";
+                if (sp.NameHumanCase.Equals("SalesByYear", StringComparison.InvariantCultureIgnoreCase))
+                    return "SalesSet";
+
+                return name;
+            };*/
+            Settings.StoredProcedureReturnModelRename = (name, sp) => name; // Do nothing by default
+
+            // StoredProcedure return types *******************************************************************************************************
+            // Override generation of return models for stored procedures that return entities.
+            // If a stored procedure returns an entity, add it to the list below.
+            // This will suppress the generation of the return model, and instead return the entity.
+            // Example:                       Proc name      Return this entity type instead
+            //StoredProcedureReturnTypes.Add("SalesByYear", "SummaryOfSalesByYear");
+
+
+            // Callbacks **********************************************************************************************************************
+            // This method will be called right before we write the POCO header.
+            this.WritePocoClassAttributes = (o, t) =>
+            {
+                if (Settings.UseDataAnnotations)
+                {
+                    foreach (var dataAnnotation in t.DataAnnotations)
+                    {
+                        o?.WriteLine("    [" + dataAnnotation + "]");
+                    }
+                }
+
+                // Example:
+                // if(t.ClassName.StartsWith("Order"))
+                //     WriteLine("    [SomeAttribute]");
+            };
+
+            // This method will be called right before we write the POCO header.
+            this.WritePocoClassExtendedComments = (o, t) =>
+            {
+                if (Settings.IncludeExtendedPropertyComments != CommentsStyle.None && !string.IsNullOrEmpty(t.ExtendedProperty))
+                {
+                    var lines = t.ExtendedProperty
+                        .Split(new string[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries)
+                        .ToList();
+                    o?.WriteLine("    ///<summary>");
+                    foreach (var line in lines.Select(x => x.Replace("///", string.Empty).Trim()))
+                    {
+                        o?.WriteLine("    /// {0}", System.Security.SecurityElement.Escape(line));
+                    }
+                    o?.WriteLine("    ///</summary>");
+                }
+            };
+
+            // Writes optional base classes
+            this.WritePocoBaseClasses = (o, t) =>
+            {
+                //if (t.ClassName == "User")
+                //    return ": IdentityUser<int, CustomUserLogin, CustomUserRole, CustomUserClaim>";
+
+                // Or use the maker class to dynamically build more complex definitions
+                /* Example:
+                var r = new BaseClassMaker("POCO.Sample.Data.MetaModelObject");
+                r.AddInterface("POCO.Sample.Data.IObjectWithTableName");
+                r.AddInterface("POCO.Sample.Data.IObjectWithId",
+                    t.Columns.Any(x => x.IsPrimaryKey && !x.IsNullable && x.NameHumanCase.Equals("Id", StringComparison.InvariantCultureIgnoreCase) && x.PropertyType == "long"));
+                r.AddInterface("POCO.Sample.Data.IObjectWithUserId",
+                    t.Columns.Any(x => !x.IsPrimaryKey && !x.IsNullable && x.NameHumanCase.Equals("UserId", StringComparison.InvariantCultureIgnoreCase) && x.PropertyType == "long"));
+                return r.ToString();
+                */
+                o?.Write("");
+            };
+
+            // Writes any boilerplate stuff inside the POCO class
+            this.WritePocoBaseClassBody = (o, t) =>
+            {
+                // Do nothing by default
+                // Example:
+                // WriteLine("        // " + t.ClassName);
+            };
+
+            this.WritePocoColumn = (o, c) =>
+            {
+                bool commentWritten = false;
+                if ((Settings.IncludeExtendedPropertyComments == CommentsStyle.InSummaryBlock ||
+                     Settings.IncludeComments == CommentsStyle.InSummaryBlock) &&
+                    !string.IsNullOrEmpty(c.SummaryComments))
+                {
+                    o?.WriteLine(string.Empty);
+                    o?.WriteLine("///<summary>");
+                    o?.WriteLine("/// {0}", System.Security.SecurityElement.Escape(c.SummaryComments));
+                    o?.WriteLine("///</summary>");
+                    commentWritten = true;
+                }
+                if (Settings.UseDataAnnotations || Settings.UseDataAnnotationsWithFluent)
+                {
+                    if (c.Ordinal > 1 && !commentWritten)
+                        o?.WriteLine(string.Empty);    // Leave a blank line before the next property
+
+                    foreach (var dataAnnotation in c.DataAnnotations)
+                    {
+                        o?.WriteLine("        [" + dataAnnotation + "]");
+                    }
+                }
+
+                // Example of adding a [Required] data annotation attribute to all non-null fields
+                //if (!c.IsNullable)
+                //    return "        [System.ComponentModel.DataAnnotations.Required] " + c.Entity;
+
+                o?.WriteLine(c.Entity);
+            };
+
+            Settings.ForeignKeyFilter = (ForeignKey fk) =>
+            {
+                // Return null to exclude this foreign key, or set IncludeReverseNavigation = false
+                // to include the foreign key but not generate reverse navigation properties.
+                // Example, to exclude all foreign keys for the Categories table, use:
+                // if (fk.PkTableName == "Categories")
+                //    return null;
+
+                // Example, to exclude reverse navigation properties for tables ending with Type, use:
+                // if (fk.PkTableName.EndsWith("Type"))
+                //    fk.IncludeReverseNavigation = false;
+
+                // You can also change the access modifier of the foreign-key's navigation property:
+                // if(fk.PkTableName == "Categories") fk.AccessModifier = "internal";
+
+                return fk;
+            };
+
+            Settings.ForeignKeyProcessing = (foreignKeys, fkTable, pkTable, anyNullableColumnInForeignKey) =>
+            {
+                var foreignKey = foreignKeys.First();
+
+                // If using data annotations and to include the [Required] attribute in the foreign key, enable the following
+                //if (!anyNullableColumnInForeignKey)
+                //   foreignKey.IncludeRequiredAttribute = true;
+
+                return foreignKey;
+            };
+
+            Settings.ForeignKeyName = (tableName, foreignKey, foreignKeyName, relationship, attempt) =>
+            {
+                string fkName;
+
+                // 5 Attempts to correctly name the foreign key
+                switch (attempt)
+                {
+                    case 1:
+                        // Try without appending foreign key name
+                        fkName = tableName;
+                        break;
+
+                    case 2:
+                        // Only called if foreign key name ends with "id"
+                        // Use foreign key name without "id" at end of string
+                        fkName = foreignKeyName.Remove(foreignKeyName.Length - 2, 2);
+                        break;
+
+                    case 3:
+                        // Use foreign key name only
+                        fkName = foreignKeyName;
+                        break;
+
+                    case 4:
+                        // Use table name and foreign key name
+                        fkName = tableName + "_" + foreignKeyName;
+                        break;
+
+                    case 5:
+                        // Used in for loop 1 to 99 to append a number to the end
+                        fkName = tableName;
+                        break;
+
+                    default:
+                        // Give up
+                        fkName = tableName;
+                        break;
+                }
+
+                // Apply custom foreign key renaming rules. Can be useful in applying pluralization.
+                // For example:
+                /*if (tableName == "Employee" && foreignKey.FkColumn == "ReportsTo")
+                    return "Manager";
+
+                if (tableName == "Territories" && foreignKey.FkTableName == "EmployeeTerritories")
+                    return "Locations";
+
+                if (tableName == "Employee" && foreignKey.FkTableName == "Orders" && foreignKey.FkColumn == "EmployeeID")
+                    return "ContactPerson";
+                */
+
+                // FK_TableName_FromThisToParentRelationshipName_FromParentToThisChildsRelationshipName
+                // (e.g. FK_CustomerAddress_Customer_Addresses will extract navigation properties "address.Customer" and "customer.Addresses")
+                // Feel free to use and change the following
+                /*if (foreignKey.ConstraintName.StartsWith("FK_") && foreignKey.ConstraintName.Count(x => x == '_') == 3)
+                {
+                    var parts = foreignKey.ConstraintName.Split('_');
+                    if (!string.IsNullOrWhiteSpace(parts[2]) && !string.IsNullOrWhiteSpace(parts[3]) && parts[1] == foreignKey.FkTableName)
+                    {
+                        if (relationship == Relationship.OneToMany)
+                            fkName = parts[3];
+                        else if (relationship == Relationship.ManyToOne)
+                            fkName = parts[2];
+                    }
+                }*/
+
+                return fkName;
+            };
+
+            Settings.ForeignKeyAnnotationsProcessing = (Table fkTable, Table pkTable, string propName, string fkPropName) =>
+            {
+                /* Example:
+                // Each navigation property that is a reference to User are left intact
+                if (pkTable.NameHumanCase.Equals("User") && propName.Equals("User"))
+                    return null;
+
+                // all the others are marked with this attribute
+                return new[] { "System.Runtime.Serialization.IgnoreDataMember" };
+                */
+
+                // Example, to include Inverse Property when using Data Annotations, use:
+                // if (Settings.UseDataAnnotations && fkPropName != string.Empty)
+                //     return new[] { "InverseProperty(\"" + fkPropName + "\")" };
+
+                return null;
+            };
+
+            // Return true to include this table in the db context
+            Settings.ConfigurationFilter = (Table t) =>
+            {
+                return true;
+            };
+
+            // That's it, nothing else to configure ***********************************************************************************************
+
+            #endregion
+        }
+        List<string> usingsContext;
+        public void Generate()
+        {
+            #region All this code mostly came from Simon Hughes T4 templates (with minor adjustments) - Database.tt - see https://github.com/sjh37/EntityFramework-Reverse-POCO-Code-First-Generator
+            // Read schema
+            var factory = GetDbProviderFactory();
+            Settings.Tables = LoadTables(factory);
+            Settings.StoredProcs = LoadStoredProcs(factory);
+
+            if (Settings.Tables.Count == 0 && Settings.StoredProcs.Count > 0)
+                return;
+
+            #region All this code mostly came from Simon Hughes T4 templates (with minor adjustments) - EF.Reverse.POCO.ttinclude - see https://github.com/sjh37/EntityFramework-Reverse-POCO-Code-First-Generator
+            #region Namespace / whole file (Line 31 to 1226)
+            //_output?.WriteLine($"namespace { Settings.Namespace }"); // Line 31 // this is in StartNewFile()
+            //_output?.WriteLine("{"); // this is in StartNewFile()
+            //using (_output?.WithIndent()) // this is in StartNewFile()
+            {
+                usingsContext = new List<string>();
+                var usingsAll = new List<string>();
+                usingsAll.AddRange(Settings.AdditionalNamespaces.Where(x => !string.IsNullOrEmpty(x)));
+                if ((Settings.ElementsToGenerate.HasFlag(Elements.PocoConfiguration) ||
+                     Settings.ElementsToGenerate.HasFlag(Elements.Context) ||
+                     Settings.ElementsToGenerate.HasFlag(Elements.UnitOfWork)) &&
+                    (!Settings.ElementsToGenerate.HasFlag(Elements.Poco) && !string.IsNullOrWhiteSpace(Settings.PocoNamespace)))
+                    usingsAll.Add(Settings.PocoNamespace);
+
+                if (Settings.ElementsToGenerate.HasFlag(Elements.PocoConfiguration) &&
+                    (!Settings.ElementsToGenerate.HasFlag(Elements.Context) && !string.IsNullOrWhiteSpace(Settings.ContextNamespace)))
+                    usingsAll.Add(Settings.ContextNamespace);
+
+                if (Settings.ElementsToGenerate.HasFlag(Elements.Context) &&
+                    (!Settings.ElementsToGenerate.HasFlag(Elements.UnitOfWork) && !string.IsNullOrWhiteSpace(Settings.UnitOfWorkNamespace)))
+                    usingsAll.Add(Settings.UnitOfWorkNamespace);
+
+                if (Settings.ElementsToGenerate.HasFlag(Elements.Context) &&
+                    (!Settings.ElementsToGenerate.HasFlag(Elements.PocoConfiguration) && !string.IsNullOrWhiteSpace(Settings.PocoConfigurationNamespace)))
+                    usingsAll.Add(Settings.PocoConfigurationNamespace);
+
+                if (Settings.ElementsToGenerate.HasFlag(Elements.Context))
+                {
+                    if (Settings.AddUnitTestingDbContext || Settings.StoredProcs.Any())
+                    {
+                        usingsContext.Add("System.Linq");
+                    }
+                }
+                if (!Settings.GenerateSeparateFiles)
+                {
+                    usingsAll.AddRange(usingsContext);
+                }
+
+                foreach (var usingStatement in usingsAll.Distinct().OrderBy(x => x))
+                    _output?.WriteLine($"using { usingStatement };");
+                Console.WriteLine("Unit of Work...");
+                #region Unit of Work (Line 77 to 200)
+                if (Settings.ElementsToGenerate.HasFlag(Elements.UnitOfWork) && !string.IsNullOrWhiteSpace(Settings.DbContextInterfaceName)) // Line 72
+                {
+                    if (Settings.GenerateSeparateFiles)
+                        StartNewFile(Settings.DbContextInterfaceName + Settings.FileExtension);
+                    else
+                        StartNewFile(_context.Output.FilePath);
+                    if (!Settings.GenerateSeparateFiles)
+                        _output?.WriteLine("#region Unit of work"); // line 77
+
+                    _output?.WriteLine($"{Settings.DbContextInterfaceModifiers ?? "public partial"} interface {Settings.DbContextInterfaceName} : {Settings.DbContextInterfaceBaseClasses}");
+                    _output?.WriteLine("{");
+                    using (_output?.WithIndent())
+                    {
+                        foreach (Table tbl in Settings.Tables.Where(t => !t.IsMapping && t.HasPrimaryKey).OrderBy(x => x.NameHumanCase))
+                        {
+                            _output?.Write($"System.Data.Entity.DbSet<{ tbl.NameHumanCaseWithSuffix() }> { Inflector.MakePlural(tbl.NameHumanCase) } {{ get; set; }}");
+                            if (Settings.IncludeComments != CommentsStyle.None)
+                                _output?.WriteLine($" // {tbl.Name}");
+                            else
+                                _output?.WriteLine($"");
+                        }
+                        _output?.WriteLine(); //TODO: Fix in Scripty - empty lines shouldn't render Indent padding.
+
+                        foreach (string s in Settings.AdditionalContextInterfaceItems.Where(x => !string.IsNullOrEmpty(x)))
+                            _output?.WriteLine(s);
+                        if (!Settings.UseInheritedBaseInterfaceFunctions)
+                        {
+                            _output?.WriteLine("int SaveChanges();");
+                            if (Settings.IsSupportedFrameworkVersion("4.5"))
+                            {
+                                _output?.WriteLine("System.Threading.Tasks.Task<int> SaveChangesAsync();");
+                                _output?.WriteLine("System.Threading.Tasks.Task<int> SaveChangesAsync(System.Threading.CancellationToken cancellationToken);");
+                            }
+                            WriteTextBlock(_output, $@"
+                                System.Data.Entity.Infrastructure.DbChangeTracker ChangeTracker {{ get; }}
+                                System.Data.Entity.Infrastructure.DbContextConfiguration Configuration {{ get; }}
+                                System.Data.Entity.Database Database {{ get; }}
+                                System.Data.Entity.Infrastructure.DbEntityEntry<TEntity> Entry<TEntity>(TEntity entity) where TEntity : class;
+                                System.Data.Entity.Infrastructure.DbEntityEntry Entry(object entity);
+                                System.Collections.Generic.IEnumerable<System.Data.Entity.Validation.DbEntityValidationResult> GetValidationErrors();
+                                System.Data.Entity.DbSet Set(System.Type entityType);
+                                System.Data.Entity.DbSet<TEntity> Set<TEntity>() where TEntity : class;
+                                string ToString();
+                                ");
+                        }
+                        if (Settings.StoredProcs.Any())
+                        {
+                            _output?.WriteLine($"");
+                            _output?.WriteLine("// Stored Procedures"); // Line 117
+                            foreach (StoredProcedure sp in Settings.StoredProcs.Where(s => !s.IsTVF).OrderBy(x => x.NameHumanCase))
+                            {
+                                int returnModelsCount = sp.ReturnModels.Count;
+                                if (returnModelsCount == 1)
+                                {
+                                    _output?.WriteLine($"{WriteStoredProcReturnType(sp)} {WriteStoredProcFunctionName(sp)}({WriteStoredProcFunctionParams(sp, false)});");
+                                    _output?.WriteLine($"{WriteStoredProcReturnType(sp)} {WriteStoredProcFunctionName(sp)}({WriteStoredProcFunctionParams(sp, true)});");
+                                }
+                                else
+                                {
+                                    _output?.WriteLine($"{WriteStoredProcReturnType(sp)} {WriteStoredProcFunctionName(sp)}({WriteStoredProcFunctionParams(sp, false)});");
+                                }
+                                if (Settings.IsSupportedFrameworkVersion("4.5"))
+                                {
+                                    if (StoredProcHasOutParams(sp) || sp.ReturnModels.Count == 0)
+                                    {
+                                        _output?.WriteLine($"// <#=WriteStoredProcFunctionName(sp)#>Async cannot be created due to having out parameters, or is relying on the procedure result (<#=WriteStoredProcReturnType(sp)#>)");
+                                    }
+                                    else
+                                    {
+                                        _output?.WriteLine($"System.Threading.Tasks.Task<{WriteStoredProcReturnType(sp)}> {WriteStoredProcFunctionName(sp)}Async({WriteStoredProcFunctionParams(sp, false)});");
+                                    }
+                                }
+                                _output?.WriteLine();
+                            }
+                            if (Settings.IncludeTableValuedFunctions)
+                            {
+                                _output?.WriteLine("// Table Valued Functions");
+                                foreach (StoredProcedure sp in Settings.StoredProcs.Where(s => s.IsTVF).OrderBy(x => x.NameHumanCase))
+                                {
+                                    string spExecName = WriteStoredProcFunctionName(sp);
+                                    string spReturnClassName = WriteStoredProcReturnModelName(sp);
+                                    _output?.WriteLine($"[System.Data.Entity.DbFunction(\" { Settings.DbContextName} \", \"{ sp.Name} \")]");
+                                    _output?.Write($"[CodeFirstStoreFunctions.DbFunctionDetails(DatabaseSchema = \"{sp.Schema}\"");
+                                    if (sp.ReturnModels.Count == 1 && sp.ReturnModels[0].Count == 1)
+                                        _output?.Write($", ResultColumnName = \"<{sp.ReturnModels[0][0].ColumnName});(");
+                                    _output?.WriteLine(")]");
+                                    _output?.WriteLine($"System.Linq.IQueryable<{ spReturnClassName }> { spExecName }({WriteStoredProcFunctionParams(sp, false)});");
+                                }
+                            }
+
+                        }
+                    }
+                    _output?.WriteLine("}");
+                }
+
+                Console.WriteLine("Db Migration Configuration...");
+                #region Db Migration Configuration (Line 161 to 196)
+                if (!string.IsNullOrWhiteSpace(Settings.MigrationConfigurationFileName))
+                {
+                    if (Settings.GenerateSeparateFiles)
+                        StartNewFile(Settings.MigrationConfigurationFileName + Settings.FileExtension);
+                    if (!Settings.GenerateSeparateFiles)
+                    {
+                        WriteTextBlock(_output, $@"
+                            // ************************************************************************
+                            // Db Migration Configuration
+                        ");
+                    }
+                    if (Settings.IncludeCodeGeneratedAttribute)
+                        _output?.WriteLine(CodeGeneratedAttribute);
+                    _output?.WriteLine($"{Settings.MigrationClassModifiers} class {Settings.MigrationConfigurationFileName}: System.Data.Entity.Migrations.DbMigrationsConfiguration<{Settings.DbContextName }> ");
+                    _output?.WriteLine("{");
+                    using (_output?.WithIndent())
+                    {
+                        _output?.WriteLine($"public {Settings.MigrationConfigurationFileName}()");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            _output?.WriteLine($"AutomaticMigrationsEnabled = { Settings.AutomaticMigrationsEnabled.ToString() };");
+                            _output?.WriteLine($"AutomaticMigrationDataLossAllowed = { Settings.AutomaticMigrationDataLossAllowed.ToString() };");
+                            if (!string.IsNullOrEmpty(Settings.ContextKey))
+                                _output?.WriteLine($@"ContextKey = ""{ Settings.ContextKey }"";");
+                        }
+                        _output?.WriteLine("}");
+                        WriteTextBlock(_output, @"
+                            //protected override void Seed(<#=Settings.DbContextName#> context)
+                            //{
+
+                                // This method will be called after migrating to the latest version.
+
+                                // You can use the DbSet<T>.AddOrUpdate() helper extension method
+                                // to avoid creating duplicate seed data. E.g.
+                                //
+                                //   context.People.AddOrUpdate(
+                                //     p => p.FullName,
+                                //     new Person { FullName = ""Andrew Peters"" },
+                                //     new Person { FullName = ""Brice Lambson"" },
+                                //     new Person { FullName = ""Rowan Miller"" }
+                                //   );
+                                //
+                            //}
+                            ");
+                    }
+                    _output?.WriteLine("}");
+                }
+                #endregion Db Migration Configuration (Line 161 to 196)
+
+                if (Settings.ElementsToGenerate.HasFlag(Elements.UnitOfWork) && !string.IsNullOrWhiteSpace(Settings.DbContextInterfaceName) && !Settings.GenerateSeparateFiles)
+                    _output?.WriteLine("#endregion\n"); // line 200
+                #endregion Unit of Work (Line 77 to 200)
+
+
+                Console.WriteLine("Database context...");
+                #region Database context (Line 203 to 509)
+                if (Settings.ElementsToGenerate.HasFlag(Elements.Context))
+                {
+                    if (Settings.GenerateSeparateFiles)
+                        StartNewFile(Settings.DbContextName + Settings.FileExtension);
+                    if (!Settings.GenerateSeparateFiles)
+                        _output?.WriteLine("#region Database context\n"); // line 206
+                    else foreach (var usingStatement in usingsContext.Distinct().OrderBy(x => x))
+                            _output?.WriteLine($"using { usingStatement };");
+                    if (Settings.IncludeCodeGeneratedAttribute)
+                        _output?.WriteLine(CodeGeneratedAttribute);
+                    _output?.WriteLine($"{ Settings.DbContextClassModifiers } class {Settings.DbContextName} : {Settings.DbContextBaseClass}{ (string.IsNullOrWhiteSpace(Settings.DbContextInterfaceName) ? "" : ", " + Settings.DbContextInterfaceName)}");
+                    _output?.WriteLine("{");
+                    using (_output?.WithIndent())
+                    {
+                        foreach (Table tbl in Settings.Tables.Where(t => !t.IsMapping && t.HasPrimaryKey).OrderBy(x => x.NameHumanCase))
+                        {
+                            // 220 to 
+                            _output?.Write($"public System.Data.Entity.DbSet<{tbl.NameHumanCaseWithSuffix()}> {Inflector.MakePlural(tbl.NameHumanCase)} {{ get; set; }}");
+                            if (Settings.IncludeComments != CommentsStyle.None)
+                                _output?.WriteLine($" // {tbl.Name}");
+                            else
+                                _output?.WriteLine($"");
+                        }
+
+                        _output?.WriteLine($"");
+                        _output?.WriteLine($"static {Settings.DbContextName}()");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            if (string.IsNullOrWhiteSpace(Settings.MigrationConfigurationFileName))
+                                _output?.WriteLine($"System.Data.Entity.Database.SetInitializer<{Settings.DbContextName}>(null);");
+                            else
+                                _output?.WriteLine($"System.Data.Entity.Database.SetInitializer(new System.Data.Entity.{Settings.MigrationStrategy}<{Settings.DbContextName}{ (Settings.MigrationStrategy == "MigrateDatabaseToLatestVersion" ? ", " + Settings.MigrationConfigurationFileName : "") }>());");
+                        }
+                        _output?.WriteLine("}");
+                        _output?.WriteLine("");
+                        if (Settings.AddParameterlessConstructorToDbContext)
+                        {
+                            _output?.Write($"public {Settings.DbContextName}()");
+                            if (Settings.DefaultConstructorArgument != null)
+                                _output?.WriteLine($" : base({Settings.DefaultConstructorArgument})");
+                            else
+                                _output?.WriteLine();
+                            _output?.WriteLine("{");
+                            using (_output?.WithIndent())
+                            {
+                                if (Settings.DbContextClassIsPartial())
+                                    _output?.WriteLine("InitializePartial();");
+                            }
+                            _output?.WriteLine("}");
+                        }
+
+                        _output?.WriteLine("");
+                        _output?.WriteLine($"public {Settings.DbContextName}(string connectionString) : base(connectionString)");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            if (Settings.DbContextClassIsPartial())
+                                _output?.WriteLine("InitializePartial();");
+                        }
+                        _output?.WriteLine("}");
+
+                        _output?.WriteLine("");
+                        _output?.WriteLine($"public {Settings.DbContextName}(string connectionString, System.Data.Entity.Infrastructure.DbCompiledModel model) : base(connectionString, model)");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            if (Settings.DbContextClassIsPartial())
+                                _output?.WriteLine("InitializePartial();");
+                        }
+                        _output?.WriteLine("}");
+
+                        _output?.WriteLine("");
+                        _output?.WriteLine($"public {Settings.DbContextName}(System.Data.Common.DbConnection existingConnection, bool contextOwnsConnection) : base(existingConnection, contextOwnsConnection)");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            if (Settings.DbContextClassIsPartial())
+                                _output?.WriteLine("InitializePartial();");
+                        }
+                        _output?.WriteLine("}");
+
+                        _output?.WriteLine("");
+                        _output?.WriteLine($"public {Settings.DbContextName}(System.Data.Common.DbConnection existingConnection, System.Data.Entity.Infrastructure.DbCompiledModel model, bool contextOwnsConnection) : base(existingConnection, model, contextOwnsConnection)");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            if (Settings.DbContextClassIsPartial())
+                                _output?.WriteLine("InitializePartial();");
+                        }
+                        _output?.WriteLine("}");
+
+                        _output?.WriteLine("");
+                        _output?.WriteLine($"public {Settings.DbContextName}(System.Data.Entity.Core.Objects.ObjectContext objectContext, bool dbContextOwnsObjectContext) : base(objectContext, dbContextOwnsObjectContext)");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            if (Settings.DbContextClassIsPartial())
+                                _output?.WriteLine("InitializePartial();");
+                        }
+                        _output?.WriteLine("}");
+
+                        _output?.WriteLine("");
+                        _output?.WriteLine($"protected override void Dispose(bool disposing)");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            if (Settings.DbContextClassIsPartial())
+                                _output?.WriteLine("DisposePartial(disposing);");
+                            _output?.WriteLine("base.Dispose(disposing);");
+                        }
+                        _output?.WriteLine("}");
+
+                        if (!Settings.IsSqlCe)
+                        {
+                            WriteTextBlock(_output, $@"
+
+                                    public bool IsSqlParameterNull(System.Data.SqlClient.SqlParameter param)
+                                    {{
+                                        var sqlValue = param.SqlValue;
+                                        var nullableValue = sqlValue as System.Data.SqlTypes.INullable;
+                                        if (nullableValue != null)
+                                            return nullableValue.IsNull;
+                                        return (sqlValue == null || sqlValue == System.DBNull.Value);
+                                    }}
+                                    ");
+                        }
+
+                        _output?.WriteLine();
+                        _output?.WriteLine($"protected override void OnModelCreating(System.Data.Entity.DbModelBuilder modelBuilder)");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            _output?.WriteLine($"base.OnModelCreating(modelBuilder);");
+                            if (Settings.StoredProcs.Any() && Settings.IncludeTableValuedFunctions)
+                            {
+                                _output?.WriteLine($"modelBuilder.Conventions.Add(new CodeFirstStoreFunctions.FunctionsConvention<{Settings.DbContextName}>(\"dbo\"));");
+                                foreach (var sp in Settings.StoredProcs.Where(s => s.IsTVF && !Settings.StoredProcedureReturnTypes.ContainsKey(s.NameHumanCase) && !Settings.StoredProcedureReturnTypes.ContainsKey(s.Name)).OrderBy(x => x.NameHumanCase))
+                                {
+                                    _output?.WriteLine($"modelBuilder.ComplexType<{WriteStoredProcReturnModelName(sp)}>();");
+                                }
+                            }
+                            foreach (var tbl in Settings.Tables.Where(t => !t.IsMapping && t.HasPrimaryKey).Where(Settings.ConfigurationFilter).OrderBy(x => x.NameHumanCase))
+                            {
+                                _output?.WriteLine($"modelBuilder.Configurations.Add(new {tbl.NameHumanCaseWithSuffix() + Settings.ConfigurationClassName}());");
+                            }
+                            if (Settings.DbContextClassIsPartial())
+                                _output?.WriteLine("OnModelCreatingPartial(modelBuilder);");
+                        }
+                        _output?.WriteLine("}");
+
+                        _output?.WriteLine("");
+                        _output?.WriteLine("public static System.Data.Entity.DbModelBuilder CreateModel(System.Data.Entity.DbModelBuilder modelBuilder, string schema)");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            foreach (var tbl in Settings.Tables.Where(t => !t.IsMapping && t.HasPrimaryKey).Where(Settings.ConfigurationFilter).OrderBy(x => x.NameHumanCase))
+                            {
+                                _output?.WriteLine($"modelBuilder.Configurations.Add(new {tbl.NameHumanCaseWithSuffix() + Settings.ConfigurationClassName}(schema));");
+                            }
+                            if (Settings.DbContextClassIsPartial())
+                                _output?.WriteLine("OnCreateModelPartial(modelBuilder, schema);");
+                            _output?.WriteLine("return modelBuilder;");
+                        }
+                        _output?.WriteLine("}");
+
+                        if (Settings.DbContextClassIsPartial()) // Line 337
+                        {
+                            WriteTextBlock(_output, $@"
+                                partial void InitializePartial();
+                                partial void DisposePartial(bool disposing);
+                                partial void OnModelCreatingPartial(System.Data.Entity.DbModelBuilder modelBuilder);
+		                        static partial void OnCreateModelPartial(System.Data.Entity.DbModelBuilder modelBuilder, string schema);
+                                ");
+
+                        }
+
+                        #region Stored Procedures (Line 344 to 487)
+                        if (Settings.StoredProcs.Any()) // Line 344
+                        {
+                            _output?.WriteLine();
+                            _output?.WriteLine("// Stored Procedures");
+                            foreach (var sp in Settings.StoredProcs.Where(s => !s.IsTVF).OrderBy(x => x.NameHumanCase)) // Line 349
+                            {
+                                string spReturnClassName = WriteStoredProcReturnModelName(sp);
+                                string spExecName = WriteStoredProcFunctionName(sp);
+                                int returnModelsCount = sp.ReturnModels.Count;
+                                #region 354 to 486
+
+                                if (returnModelsCount > 0) // Line 354?
+                                {
+                                    if (returnModelsCount == 1) // Line 356
+                                    {
+                                        // Line 358 to 362
+                                        WriteTextBlock(_output, $@"
+                                            public {WriteStoredProcReturnType(sp) } {WriteStoredProcFunctionName(sp) }({WriteStoredProcFunctionParams(sp, false) })
+                                            {{
+                                                int procResult;
+                                                return { spExecName }({WriteStoredProcFunctionOverloadCall(sp) });
+                                            }}
+
+                                        ");
+                                    }
+                                    if (returnModelsCount == 1)
+                                        _output?.WriteLine($@"public {WriteStoredProcReturnType(sp) } {WriteStoredProcFunctionName(sp) }({WriteStoredProcFunctionParams(sp, true) })");
+                                    else
+                                        _output?.WriteLine($@"public {WriteStoredProcReturnType(sp) } {WriteStoredProcFunctionName(sp) }({WriteStoredProcFunctionParams(sp, false) })");
+                                    _output?.WriteLine("{");
+                                    using (_output?.WithIndent())
+                                    {
+                                        WriteStoredProcFunctionDeclareSqlParameter(_output, sp, true);
+                                        if (returnModelsCount == 1)
+                                        {
+                                            var exec = string.Format("EXEC @procResult = [{0}].[{1}] {2}", sp.Schema, sp.Name, WriteStoredProcFunctionSqlAtParams(sp));
+                                            _output?.WriteLine($"var procResultData = Database.SqlQuery<{ spReturnClassName }>(\"{ exec }\", { WriteStoredProcFunctionSqlParameterAnonymousArray(sp, true) }).ToList();");
+                                            WriteStoredProcFunctionSetSqlParameters(_output, sp, false);
+                                            _output?.WriteLine("procResult = (int) procResultParam.Value;");
+                                        }
+                                        else
+                                        {
+                                            var exec = string.Format("[{0}].[{1}]", sp.Schema, sp.Name);
+                                            WriteStoredProcFunctionSetSqlParameters(_output, sp, false);
+                                            WriteTextBlock(_output, $@"
+                                            var procResultData = new { spReturnClassName }();
+                                            var cmd = Database.Connection.CreateCommand();
+                                            cmd.CommandType = System.Data.CommandType.StoredProcedure;
+                                            cmd.CommandText = ""{ exec }"";");
+                                            foreach (var p in sp.Parameters.OrderBy(x => x.Ordinal))
+                                                _output?.WriteLine($@"cmd.Parameters.Add({ WriteStoredProcSqlParameterName(p) });");
+                                            _output?.WriteLine("try");
+                                            _output?.WriteLine("{");
+                                            using (_output?.WithIndent())
+                                            {
+                                                _output?.WriteLine($@"System.Data.Entity.Infrastructure.Interception.DbInterception.Dispatch.Connection.Open(Database.Connection, new System.Data.Entity.Infrastructure.Interception.DbInterceptionContext());");
+                                                _output?.WriteLine($@"var reader = cmd.ExecuteReader();");
+                                                _output?.WriteLine($@"var objectContext = ((System.Data.Entity.Infrastructure.IObjectContextAdapter) this).ObjectContext;");
+                                                _output?.WriteLine($@"");
+                                                int n = 0;
+                                                var returnModelCount = sp.ReturnModels.Count;
+                                                foreach (var returnModel in sp.ReturnModels)
+                                                {
+                                                    n++;
+                                                    _output?.WriteLine($@"procResultData.ResultSet{ n } = objectContext.Translate<{ spReturnClassName }.ResultSetModel{ n }>(reader).ToList();");
+                                                    if (n < returnModelCount)
+                                                        _output?.WriteLine($@"reader.NextResult();");
+                                                }
+                                                _output?.WriteLine($@"reader.Close();");
+                                                WriteStoredProcFunctionSetSqlParameters(_output, sp, false);
+                                            }
+                                            _output?.WriteLine("}");
+                                            _output?.WriteLine("finally");
+                                            _output?.WriteLine("{");
+                                            using (_output?.WithIndent())
+                                            {
+                                                _output?.WriteLine("System.Data.Entity.Infrastructure.Interception.DbInterception.Dispatch.Connection.Close(Database.Connection, new System.Data.Entity.Infrastructure.Interception.DbInterceptionContext());");
+                                            }
+                                            _output?.WriteLine("}");
+                                        }
+                                        _output?.WriteLine("return procResultData;");
+                                    }
+                                    _output?.WriteLine("}"); // Line 417
+                                    _output?.WriteLine();
+                                } // Line 419?
+                                else
+                                {
+                                    _output?.WriteLine($@"public int { spExecName }({WriteStoredProcFunctionParams(sp, true) })");
+                                    _output?.WriteLine("{");
+                                    WriteStoredProcFunctionDeclareSqlParameter(_output, sp, true);
+                                    _output?.WriteLine($@"Database.ExecuteSqlCommand(System.Data.Entity.TransactionalBehavior.DoNotEnsureTransaction, ""EXEC @procResult = [{sp.Schema }].[{ sp.Name } { WriteStoredProcFunctionSqlAtParams(sp) }"", { WriteStoredProcFunctionSqlParameterAnonymousArray(sp, true) });");
+                                    WriteStoredProcFunctionSetSqlParameters(_output, sp, false);
+                                    _output?.WriteLine("return (int) procResultParam.Value;");
+                                    _output?.WriteLine("}");
+                                } // Line 430?
+                                // Async
+                                if (Settings.IsSupportedFrameworkVersion("4.5") && !StoredProcHasOutParams(sp) && returnModelsCount > 0) // Line 432
+                                {
+                                    _output?.WriteLine($@"public async System.Threading.Tasks.Task<{WriteStoredProcReturnType(sp) }> {WriteStoredProcFunctionName(sp) }Async({WriteStoredProcFunctionParams(sp, false) })");
+                                    _output?.WriteLine("{");
+                                    using (_output?.WithIndent())
+                                    {
+                                        WriteStoredProcFunctionDeclareSqlParameter(_output, sp, false);
+                                        if (returnModelsCount == 1)
+                                        {
+                                            var parameters = WriteStoredProcFunctionSqlParameterAnonymousArray(sp, false);
+                                            if (!string.IsNullOrWhiteSpace(parameters))
+                                                parameters = ", " + parameters;
+                                            var exec = string.Format("EXEC [{0}].[{1}] {2}", sp.Schema, sp.Name, WriteStoredProcFunctionSqlAtParams(sp));
+                                            _output?.WriteLine($@"var procResultData = await Database.SqlQuery<{ spReturnClassName }>(""{ exec }""{ parameters }).ToListAsync();");
+                                            WriteStoredProcFunctionSetSqlParameters(_output, sp, false);
+                                        }
+                                        else
+                                        {
+                                            var exec = string.Format("[{0}].[{1}]", sp.Schema, sp.Name);
+                                            WriteStoredProcFunctionSetSqlParameters(_output, sp, false);
+                                            _output?.WriteLine($@"var procResultData = new { spReturnClassName }();");
+                                            _output?.WriteLine("var cmd = Database.Connection.CreateCommand();");
+                                            _output?.WriteLine("cmd.CommandType = System.Data.CommandType.StoredProcedure;");
+                                            _output?.WriteLine($@"cmd.CommandText = ""{ exec }"";");
+                                            foreach (var p in sp.Parameters.OrderBy(x => x.Ordinal))
+                                                _output?.WriteLine($@"cmd.Parameters.Add({ WriteStoredProcSqlParameterName(p) });");
+                                            _output?.WriteLine($@"try");
+                                            _output?.WriteLine("{");
+                                            using (_output?.WithIndent())
+                                            {
+                                                _output?.WriteLine($@"await System.Data.Entity.Infrastructure.Interception.DbInterception.Dispatch.Connection.OpenAsync(Database.Connection, new System.Data.Entity.Infrastructure.Interception.DbInterceptionContext(), new System.Threading.CancellationToken()).ConfigureAwait(false);");
+                                                _output?.WriteLine($@"var reader = await cmd.ExecuteReaderAsync().ConfigureAwait(false);");
+                                                _output?.WriteLine($@"var objectContext = ((System.Data.Entity.Infrastructure.IObjectContextAdapter) this).ObjectContext;");
+                                                int n = 0;
+                                                var returnModelCount = sp.ReturnModels.Count;
+                                                foreach (var returnModel in sp.ReturnModels)
+                                                {
+                                                    n++;
+                                                    _output?.WriteLine($@"procResultData.ResultSet{ n } = objectContext.Translate<{ spReturnClassName }.ResultSetModel{ n }>(reader).ToList();");
+                                                    if (n < returnModelCount)
+                                                        _output?.WriteLine($@"await reader.NextResultAsync().ConfigureAwait(false);");
+                                                }
+                                            }
+                                            _output?.WriteLine("}");
+                                            _output?.WriteLine("finally");
+                                            _output?.WriteLine("{");
+                                            _output?.WriteLine("    System.Data.Entity.Infrastructure.Interception.DbInterception.Dispatch.Connection.Close(Database.Connection, new System.Data.Entity.Infrastructure.Interception.DbInterceptionContext());");
+                                            _output?.WriteLine("}");
+                                        }
+                                        _output?.WriteLine("return procResultData;");
+                                    }
+                                    _output?.WriteLine("}");
+                                } // 486?
+                                #endregion
+                            } // Line 486?
+                        } // Line 487
+                        #endregion Stored Procedures (Line 344 to 487)
+
+                        Console.WriteLine("IncludeTableValuedFunctions...");
+                        #region IncludeTableValuedFunctions (488 to 509)
+                        if (Settings.IncludeTableValuedFunctions)
+                        {
+                            _output?.WriteLine("// Table Valued Functions");
+                            foreach (var sp in Settings.StoredProcs.Where(s => s.IsTVF).OrderBy(x => x.NameHumanCase))
+                            {
+                                string spExecName = WriteStoredProcFunctionName(sp);
+                                string spReturnClassName = WriteStoredProcReturnModelName(sp);
+                                _output?.WriteLine($@"[System.Data.Entity.DbFunction(""{Settings.DbContextName}"", ""{sp.Name}"")]");
+                                _output?.WriteLine($@"[CodeFirstStoreFunctions.DbFunctionDetails(DatabaseSchema = ""{sp.Schema}""");
+                                if (sp.ReturnModels.Count == 1 && sp.ReturnModels[0].Count == 1)
+                                    _output?.Write($", ResultColumnName = \"<{sp.ReturnModels[0][0].ColumnName});(");
+                                _output?.WriteLine(")]");
+                                _output?.WriteLine($"public IQueryable<{ spReturnClassName }> { spExecName }({WriteStoredProcFunctionParams(sp, false)});");
+                                _output?.WriteLine("{");
+                                using (_output?.WithIndent())
+                                {
+                                    string procParameters = WriteTableValuedFunctionDeclareSqlParameter(sp);
+                                    if (!string.IsNullOrEmpty(procParameters))
+                                        _output?.WriteLine(procParameters);
+                                    _output?.WriteLine($@"return ((System.Data.Entity.Infrastructure.IObjectContextAdapter)this).ObjectContext.CreateQuery<{spReturnClassName}>(""[{ Settings.DbContextName}].[{sp.Name}]({ WriteStoredProcFunctionSqlAtParams(sp) })"", { WriteTableValuedFunctionSqlParameterAnonymousArray(sp) });");
+                                }
+                                _output?.WriteLine("}");
+                            }
+                        }
+                        #endregion
+
+
+
+                    }
+                    _output?.WriteLine("}");
+                    if (Settings.ElementsToGenerate.HasFlag(Elements.Context) && !Settings.GenerateSeparateFiles)
+                        _output?.WriteLine("#endregion\n"); // line 509
+                }
+                #endregion Database context (Line 203 to 509)
+
+                Console.WriteLine("Database context factory...");
+                #region Database context factory (Line 511 to 532)
+                if (Settings.ElementsToGenerate.HasFlag(Elements.Context) && Settings.AddIDbContextFactory)
+                {
+                    if (Settings.GenerateSeparateFiles)
+                        StartNewFile(Settings.DbContextName + "Factory" + Settings.FileExtension);
+                    if (!Settings.GenerateSeparateFiles)
+                        _output?.WriteLine("#region Database context factory\n"); // line 517
+                    WriteTextBlock(_output, $@"
+                        { Settings.DbContextClassModifiers } class { Settings.DbContextName + "Factory" } : System.Data.Entity.Infrastructure.IDbContextFactory<{ Settings.DbContextName }>
+                        {{
+                            public { Settings.DbContextName } Create()
+                            {{
+                                return new { Settings.DbContextName }();
+                            }}
+                        }}
+                        ");
+                    if (!Settings.GenerateSeparateFiles)
+                    {
+                        _output?.WriteLine("\n");
+                        _output?.WriteLine("#endregion\n"); // line 529
+
+                    }
+
+                }
+                #endregion Database context factory (Line 511 to 532)
+
+
+                Console.WriteLine("Fake Database context...");
+                #region Fake Database context (Line 533 to 1002)
+                if (Settings.ElementsToGenerate.HasFlag(Elements.Context) && Settings.AddUnitTestingDbContext)
+                {
+                    if (Settings.GenerateSeparateFiles)
+                        StartNewFile("Fake" + Settings.DbContextName + Settings.FileExtension);
+                    if (!Settings.GenerateSeparateFiles)
+                        _output?.WriteLine("#region Fake Database context"); // line 538
+                    else foreach (var usingStatement in usingsContext.Distinct().OrderBy(x => x))
+                            _output?.WriteLine($"using { usingStatement };");
+                    if (Settings.IncludeCodeGeneratedAttribute)
+                        _output?.WriteLine(CodeGeneratedAttribute);
+
+                    Console.WriteLine("548...");
+                    #region 548 to 1000
+                    _output?.WriteLine($"{ Settings.DbContextClassModifiers } class Fake{Settings.DbContextName}{ (string.IsNullOrWhiteSpace(Settings.DbContextInterfaceName) ? "" : " : " + Settings.DbContextInterfaceName)}");
+                    _output?.WriteLine("{");
+                    using (_output?.WithIndent())
+                    {
+                        foreach (Table tbl in Settings.Tables.Where(t => !t.IsMapping && t.HasPrimaryKey).OrderBy(x => x.NameHumanCase)) // Line 551
+                        {
+                            _output?.WriteLine($"public System.Data.Entity.DbSet<{tbl.NameHumanCaseWithSuffix()}> {Inflector.MakePlural(tbl.NameHumanCase)} {{ get; set; }}");
+                        }
+
+                        _output?.WriteLine($"");
+                        _output?.WriteLine($"public Fake{Settings.DbContextName}()");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            _output?.WriteLine("_changeTracker = null;");
+                            _output?.WriteLine("_configuration = null;");
+                            _output?.WriteLine("_database = null;");
+
+                            foreach (Table tbl in Settings.Tables.Where(t => !t.IsMapping && t.HasPrimaryKey).OrderBy(x => x.NameHumanCase)) // Line 564
+                                _output?.WriteLine($@"{Inflector.MakePlural(tbl.NameHumanCase) } = new FakeDbSet<{tbl.NameHumanCaseWithSuffix() }>({ string.Join(", ", tbl.PrimaryKeys.Select(x => "\"" + x.NameHumanCase + "\"")) });");
+                            if (Settings.DbContextClassIsPartial())
+                                _output?.WriteLine("InitializePartial();");
+                        }
+                        _output?.WriteLine("}");
+                        _output?.WriteLine("");
+
+                        WriteTextBlock(_output, $@"
+                            public int SaveChangesCount {{ get; private set; }}
+                            public int SaveChanges()
+                            {{
+                                ++SaveChangesCount;
+                                return 1;
+                            }}
+                        ");
+
+                        if (Settings.IsSupportedFrameworkVersion("4.5"))
+                        {
+
+                            WriteTextBlock(_output, $@"
+                                public System.Threading.Tasks.Task<int> SaveChangesAsync()
+                                {{
+                                    ++SaveChangesCount;
+                                    return System.Threading.Tasks.Task<int>.Factory.StartNew(() => 1);
+                                }}
+
+                                public System.Threading.Tasks.Task<int> SaveChangesAsync(System.Threading.CancellationToken cancellationToken)
+                                {{
+                                    ++SaveChangesCount;
+                                    return System.Threading.Tasks.Task<int>.Factory.StartNew(() => 1, cancellationToken);
+                                }}
+                        ");
+                        }
+
+                        if (Settings.DbContextClassIsPartial())
+                            _output?.WriteLine("partial void InitializePartial();");
+
+                        WriteTextBlock(_output, @"
+                            protected virtual void Dispose(bool disposing)
+                            {
+                            }
+
+                            public void Dispose()
+                            {
+                                Dispose(true);
+                            }
+
+                            private System.Data.Entity.Infrastructure.DbChangeTracker _changeTracker;
+                            public System.Data.Entity.Infrastructure.DbChangeTracker ChangeTracker { get { return _changeTracker; } }
+                            private System.Data.Entity.Infrastructure.DbContextConfiguration _configuration;
+                            public System.Data.Entity.Infrastructure.DbContextConfiguration Configuration { get { return _configuration; } }
+                            private System.Data.Entity.Database _database;
+                            public System.Data.Entity.Database Database { get { return _database; } }
+                            public System.Data.Entity.Infrastructure.DbEntityEntry<TEntity> Entry<TEntity>(TEntity entity) where TEntity : class
+                            {
+                                throw new System.NotImplementedException();
+                            }
+                            public System.Data.Entity.Infrastructure.DbEntityEntry Entry(object entity)
+                            {
+                                throw new System.NotImplementedException();
+                            }
+                            public System.Collections.Generic.IEnumerable<System.Data.Entity.Validation.DbEntityValidationResult> GetValidationErrors()
+                            {
+                                throw new System.NotImplementedException();
+                            }
+                            public System.Data.Entity.DbSet Set(System.Type entityType)
+                            {
+                                throw new System.NotImplementedException();
+                            }
+                            public System.Data.Entity.DbSet<TEntity> Set<TEntity>() where TEntity : class
+                            {
+                                throw new System.NotImplementedException();
+                            }
+                            public override string ToString()
+                            {
+                                throw new System.NotImplementedException();
+                            }
+                            ");
+
+
+                        if (Settings.StoredProcs.Any()) // Line 639
+                        {
+                            _output?.WriteLine("// Stored Procedures");
+                            foreach (StoredProcedure sp in Settings.StoredProcs.Where(s => !s.IsTVF).OrderBy(x => x.NameHumanCase)) // Line 644
+                            {
+                                string spReturnClassName = WriteStoredProcReturnModelName(sp);
+                                string spExecName = WriteStoredProcFunctionName(sp);
+                                int returnModelsCount = sp.ReturnModels.Count;
+                                #region Lines 649 to 687
+                                if (returnModelsCount > 0)
+                                {
+                                    _output?.WriteLine($@"public {WriteStoredProcReturnType(sp) } {WriteStoredProcFunctionName(sp) }({WriteStoredProcFunctionParams(sp, false) })");
+                                    _output?.WriteLine("{");
+                                    using (_output?.WithIndent())
+                                    {
+                                        _output?.WriteLine($@"int procResult;");
+                                        _output?.WriteLine($@"return {spExecName }({WriteStoredProcFunctionOverloadCall(sp) });");
+                                    }
+                                    _output?.WriteLine("}");
+
+                                    _output?.WriteLine("");
+
+                                    _output?.WriteLine($@"public {WriteStoredProcReturnType(sp) } {WriteStoredProcFunctionName(sp) }({WriteStoredProcFunctionParams(sp, true) })");
+                                    _output?.WriteLine("{");
+                                    using (_output?.WithIndent())
+                                    {
+                                        WriteStoredProcFunctionSetSqlParameters(_output, sp, true);
+                                        _output?.WriteLine($@"procResult = 0;");
+                                        _output?.WriteLine($@"return new {WriteStoredProcReturnType(sp) }();");
+                                    }
+                                    _output?.WriteLine("}");
+
+                                    if (Settings.IsSupportedFrameworkVersion("4.5") && !StoredProcHasOutParams(sp) && returnModelsCount > 0)
+                                    {
+                                        WriteTextBlock(_output, $@"
+                                        public System.Threading.Tasks.Task<{WriteStoredProcReturnType(sp)}> {WriteStoredProcFunctionName(sp) }Async({WriteStoredProcFunctionParams(sp, false) })
+                                        {{
+                                            int procResult;
+                                            return System.Threading.Tasks.Task.FromResult({ spExecName }({WriteStoredProcFunctionOverloadCall(sp) }));
+                                        }}
+                                        ");
+                                    }
+                                }
+                                else
+                                {
+                                    _output?.WriteLine($@"public int { spExecName }(<#=WriteStoredProcFunctionParams(sp, true) #>)");
+                                    _output?.WriteLine("{");
+                                    using (_output?.WithIndent())
+                                    {
+                                        WriteStoredProcFunctionSetSqlParameters(_output, sp, true);
+                                        _output?.WriteLine($@"return 0;");
+                                    }
+                                    _output?.WriteLine("}");
+
+
+                                    if (Settings.IsSupportedFrameworkVersion("4.5") && !StoredProcHasOutParams(sp) && returnModelsCount > 0)
+                                    {
+                                        _output?.WriteLine($@"public System.Threading.Tasks.Task<int> { spExecName }Async({WriteStoredProcFunctionParams(sp, false) })");
+                                        _output?.WriteLine("{");
+                                        using (_output?.WithIndent())
+                                        {
+                                            WriteStoredProcFunctionSetSqlParameters(_output, sp, true);
+                                            _output?.WriteLine($@"return System.Threading.Tasks.Task.FromResult(0);");
+                                        }
+                                        _output?.WriteLine("}");
+                                    }
+                                }
+                                #endregion Lines 649 to 687
+                            }
+                        }
+                        #region IncludeTableValuedFunctions (Lines 688 to 705)
+                        if (Settings.IncludeTableValuedFunctions)
+                        {
+                            _output?.WriteLine("// Table Valued Functions");
+                            foreach (StoredProcedure spTvf in Settings.StoredProcs.Where(s => s.IsTVF).OrderBy(x => x.NameHumanCase))
+                            {
+                                string spExecNamespTvf = WriteStoredProcFunctionName(spTvf);
+                                string spReturnClassName = WriteStoredProcReturnModelName(spTvf);
+                                WriteTextBlock(_output, $@"
+                                    [System.Data.Entity.DbFunction(""{ Settings.DbContextName}"", ""{ spTvf.Name}"")]
+                                    public IQueryable<{ spReturnClassName }> { spExecNamespTvf } ({WriteStoredProcFunctionParams(spTvf, false)})
+                                    {{
+                                        return new System.Collections.Generic.List<{ spReturnClassName }>().AsQueryable();
+                                    }}
+                                    ");
+                            }
+                        }
+                        #endregion IncludeTableValuedFunctions (Lines 688 to 705)
+
+
+                    }
+                    _output?.WriteLine("}"); // end of DbContextName
+
+
+                    if (Settings.GenerateSeparateFiles)
+                        StartNewFile("FakeDbSet" + Settings.FileExtension);
+                    if (Settings.GenerateSeparateFiles)
+                        _output?.WriteLine("using System.Linq;");
+                    WriteTextBlock(_output, @"
+                        // ************************************************************************
+                        // Fake DbSet
+                        // Implementing Find:
+                        //      The Find method is difficult to implement in a generic fashion. If
+                        //      you need to test code that makes use of the Find method it is
+                        //      easiest to create a test DbSet for each of the entity types that
+                        //      need to support find. You can then write logic to find that
+                        //      particular type of entity, as shown below:
+                        //      public class FakeBlogDbSet : FakeDbSet<Blog>
+                        //      {
+                        //          public override Blog Find(params object[] keyValues)
+                        //          {
+                        //              var id = (int) keyValues.Single();
+                        //              return this.SingleOrDefault(b => b.BlogId == id);
+                        //          }
+                        //      }
+                        //      Read more about it here: https://msdn.microsoft.com/en-us/data/dn314431.aspx
+                        ");
+                    if (Settings.IncludeCodeGeneratedAttribute)
+                        _output?.WriteLine(CodeGeneratedAttribute);
+                    _output?.WriteLine($@"{ Settings.DbContextClassModifiers } class FakeDbSet<TEntity> : System.Data.Entity.DbSet<TEntity>, IQueryable, System.Collections.Generic.IEnumerable<TEntity>{ (Settings.IsSupportedFrameworkVersion("4.5") ? ", System.Data.Entity.Infrastructure.IDbAsyncEnumerable<TEntity>":"") } where TEntity : class");
+                    _output?.WriteLine("{");
+                    using (_output?.WithIndent())
+                    {
+                        _output?.WriteLine("private readonly System.Reflection.PropertyInfo[] _primaryKeys;");
+                        _output?.WriteLine("private readonly System.Collections.ObjectModel.ObservableCollection<TEntity> _data;");
+                        _output?.WriteLine("private readonly IQueryable _query;");
+
+                        _output?.WriteLine("");
+                        _output?.WriteLine("public FakeDbSet()");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            _output?.WriteLine("_data = new System.Collections.ObjectModel.ObservableCollection<TEntity>();");
+                            _output?.WriteLine("_query = _data.AsQueryable();");
+                            if (Settings.DbContextClassIsPartial())
+                                _output?.WriteLine("InitializePartial();");
+                        }
+                        _output?.WriteLine("}");
+
+                        _output?.WriteLine("");
+                        _output?.WriteLine("public FakeDbSet(params string[] primaryKeys)");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            _output?.WriteLine("_primaryKeys = typeof(TEntity).GetProperties().Where(x => primaryKeys.Contains(x.Name)).ToArray();");
+                            _output?.WriteLine("_data = new System.Collections.ObjectModel.ObservableCollection<TEntity>();");
+                            _output?.WriteLine("_query = _data.AsQueryable();");
+                            if (Settings.DbContextClassIsPartial())
+                                _output?.WriteLine("InitializePartial();");
+                        }
+                        _output?.WriteLine("}");
+
+
+                        WriteTextBlock(_output, $@"
+                            public override TEntity Find(params object[] keyValues)
+                            {{
+                                if (_primaryKeys == null)
+                                    throw new System.ArgumentException(""No primary keys defined"");
+                                if (keyValues.Length != _primaryKeys.Length)
+                                    throw new System.ArgumentException(""Incorrect number of keys passed to Find method"");
+
+                                var keyQuery = this.AsQueryable();
+                                keyQuery = keyValues
+                                    .Select((t, i) => i)
+                                    .Aggregate(keyQuery,
+                                        (current, x) =>
+                                            current.Where(entity => _primaryKeys[x].GetValue(entity, null).Equals(keyValues[x])));
+
+                                return keyQuery.SingleOrDefault();
+                            }}
+
+                            ");
+
+                        if (Settings.IsSupportedFrameworkVersion("4.5"))
+                        {
+                            WriteTextBlock(_output, $@"
+                            public override System.Threading.Tasks.Task<TEntity> FindAsync(System.Threading.CancellationToken cancellationToken, params object[] keyValues)
+                            {{
+                                return System.Threading.Tasks.Task<TEntity>.Factory.StartNew(() => Find(keyValues), cancellationToken);
+                            }}
+
+                            public override System.Threading.Tasks.Task<TEntity> FindAsync(params object[] keyValues)
+                            {{
+                                return System.Threading.Tasks.Task<TEntity>.Factory.StartNew(() => Find(keyValues));
+                            }}
+");
+
+                        }
+
+                        WriteTextBlock(_output, $@"
+                            public override System.Collections.Generic.IEnumerable<TEntity> AddRange(System.Collections.Generic.IEnumerable<TEntity> entities)
+                            {{
+                                if (entities == null) throw new System.ArgumentNullException(""entities"");
+                                var items = entities.ToList();
+                                foreach (var entity in items)
+                                {{
+                                    _data.Add(entity);
+                                }}
+                                return items;
+                            }}
+
+                            public override TEntity Add(TEntity item)
+                            {{
+                                if (item == null) throw new System.ArgumentNullException(""item"");
+                                _data.Add(item);
+                                return item;
+                            }}
+
+                            public override System.Collections.Generic.IEnumerable<TEntity> RemoveRange(System.Collections.Generic.IEnumerable<TEntity> entities)
+                            {{
+                                if (entities == null) throw new System.ArgumentNullException(""entities"");
+                                var items = entities.ToList();
+                                foreach (var entity in items)
+                                {{
+                                    _data.Remove(entity);
+                                }}
+                                return items;
+                            }}
+
+                            public override TEntity Remove(TEntity item)
+                            {{
+                                if (item == null) throw new System.ArgumentNullException(""item"");
+                                _data.Remove(item);
+                                return item;
+                            }}
+
+                            public override TEntity Attach(TEntity item)
+                            {{
+                                if (item == null) throw new System.ArgumentNullException(""item"");
+                                _data.Add(item);
+                                return item;
+                            }}
+
+                            public override TEntity Create()
+                            {{
+                                return System.Activator.CreateInstance<TEntity>();
+                            }}
+
+                            public override TDerivedEntity Create<TDerivedEntity>()
+                            {{
+                                return System.Activator.CreateInstance<TDerivedEntity>();
+                            }}
+
+                            public override System.Collections.ObjectModel.ObservableCollection<TEntity> Local
+                            {{
+                                get {{ return _data; }}
+                            }}
+
+                            System.Type IQueryable.ElementType
+                            {{
+                                get {{ return _query.ElementType; }}
+                            }}
+
+                            System.Linq.Expressions.Expression IQueryable.Expression
+                            {{
+                                get {{ return _query.Expression; }}
+                            }}
+
+                            IQueryProvider IQueryable.Provider
+                            {{
+                                get {{ {(Settings.IsSupportedFrameworkVersion("4.5") ? "return new FakeDbAsyncQueryProvider<TEntity>(_query.Provider);" : "_query.Provider;")} }}
+                            }}     
+
+                            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
+                            {{
+                                return _data.GetEnumerator();
+                            }}
+
+                            System.Collections.Generic.IEnumerator<TEntity> System.Collections.Generic.IEnumerable<TEntity>.GetEnumerator()
+                            {{
+                                return _data.GetEnumerator();
+                            }}
+                            { (Settings.IsSupportedFrameworkVersion("4.5") ?
+                                $@"
+                            System.Data.Entity.Infrastructure.IDbAsyncEnumerator<TEntity> System.Data.Entity.Infrastructure.IDbAsyncEnumerable<TEntity>.GetAsyncEnumerator()
+                            {{
+                                return new FakeDbAsyncEnumerator<TEntity>(_data.GetEnumerator());
+                            }}" : "")
+                            }
+
+                            { (Settings.DbContextClassIsPartial() ? "partial void InitializePartial();":"") }
+                            ");
+                    }
+                    _output?.WriteLine("}"); // Line 882
+                    _output?.WriteLine("");
+
+                    if (Settings.IncludeCodeGeneratedAttribute)
+                        _output?.WriteLine(CodeGeneratedAttribute);
+                    _output?.WriteLine($@"{ Settings.DbContextClassModifiers } class FakeDbAsyncQueryProvider<TEntity> : System.Data.Entity.Infrastructure.IDbAsyncQueryProvider");
+                    _output?.WriteLine("{");
+                    using (_output?.WithIndent())
+                    {
+                        WriteTextBlock(_output, $@"
+                            private readonly IQueryProvider _inner;
+
+                            public FakeDbAsyncQueryProvider(IQueryProvider inner)
+                            {{
+                                _inner = inner;
+                            }}
+
+                            public IQueryable CreateQuery(System.Linq.Expressions.Expression expression)
+                            {{
+                                var m = expression as System.Linq.Expressions.MethodCallExpression;
+                                if (m != null)
+                                {{
+                                    var resultType = m.Method.ReturnType; // it shoud be IQueryable<T>
+                                    var tElement = resultType.GetGenericArguments()[0];
+                                    var queryType = typeof(FakeDbAsyncEnumerable<>).MakeGenericType(tElement);
+                                    return (IQueryable) System.Activator.CreateInstance(queryType, expression);
+                                }}
+                                return new FakeDbAsyncEnumerable<TEntity>(expression);
+                            }}
+
+                            public IQueryable<TElement> CreateQuery<TElement>(System.Linq.Expressions.Expression expression)
+                            {{
+                                var queryType = typeof(FakeDbAsyncEnumerable<>).MakeGenericType(typeof(TElement));
+                                return (IQueryable<TElement>)System.Activator.CreateInstance(queryType, expression);
+                            }}
+
+                            public object Execute(System.Linq.Expressions.Expression expression)
+                            {{
+                                return _inner.Execute(expression);
+                            }}
+
+                            public TResult Execute<TResult>(System.Linq.Expressions.Expression expression)
+                            {{
+                                return _inner.Execute<TResult>(expression);
+                            }}
+
+                            public System.Threading.Tasks.Task<object> ExecuteAsync(System.Linq.Expressions.Expression expression, System.Threading.CancellationToken cancellationToken)
+                            {{
+                                return System.Threading.Tasks.Task.FromResult(Execute(expression));
+                            }}
+
+                            public System.Threading.Tasks.Task<TResult> ExecuteAsync<TResult>(System.Linq.Expressions.Expression expression, System.Threading.CancellationToken cancellationToken)
+                            {{
+                                return System.Threading.Tasks.Task.FromResult(Execute<TResult>(expression));
+                            }}
+                            ");
+                    }
+                    _output?.WriteLine("}");
+
+
+
+                    if (Settings.IncludeCodeGeneratedAttribute) // 937
+                        _output?.WriteLine(CodeGeneratedAttribute);
+                    _output?.WriteLine($@"{ Settings.DbContextClassModifiers } class FakeDbAsyncEnumerable<T> : EnumerableQuery<T>, System.Data.Entity.Infrastructure.IDbAsyncEnumerable<T>, IQueryable<T>");
+                    _output?.WriteLine("{");
+                    using (_output?.WithIndent())
+                    {
+                        WriteTextBlock(_output, $@"
+                            public FakeDbAsyncEnumerable(System.Collections.Generic.IEnumerable<T> enumerable) : base(enumerable)
+                            {{ }}
+
+                            public FakeDbAsyncEnumerable(System.Linq.Expressions.Expression expression) : base(expression)
+                            {{ }}
+
+                            public System.Data.Entity.Infrastructure.IDbAsyncEnumerator<T> GetAsyncEnumerator()
+                            {{
+                                return new FakeDbAsyncEnumerator<T>(this.AsEnumerable().GetEnumerator());
+                            }}
+
+                            System.Data.Entity.Infrastructure.IDbAsyncEnumerator System.Data.Entity.Infrastructure.IDbAsyncEnumerable.GetAsyncEnumerator()
+                            {{
+                                return GetAsyncEnumerator();
+                            }}
+
+                            IQueryProvider IQueryable.Provider
+                            {{
+                                get {{ return new FakeDbAsyncQueryProvider<T>(this); }}
+                            }}
+                            ");
+                    }
+                    _output?.WriteLine("}");
+
+                    if (Settings.IncludeCodeGeneratedAttribute) // 937
+                        _output?.WriteLine(CodeGeneratedAttribute);
+                    _output?.WriteLine($@"{ Settings.DbContextClassModifiers } class FakeDbAsyncEnumerator<T> : System.Data.Entity.Infrastructure.IDbAsyncEnumerator<T>");
+                    _output?.WriteLine("{");
+                    using (_output?.WithIndent())
+                    {
+                        WriteTextBlock(_output, $@"
+                            private readonly System.Collections.Generic.IEnumerator<T> _inner;
+
+                            public FakeDbAsyncEnumerator(System.Collections.Generic.IEnumerator<T> inner)
+                            {{
+                                _inner = inner;
+                            }}
+
+                            public void Dispose()
+                            {{
+                                _inner.Dispose();
+                            }}
+
+                            public System.Threading.Tasks.Task<bool> MoveNextAsync(System.Threading.CancellationToken cancellationToken)
+                            {{
+                                return System.Threading.Tasks.Task.FromResult(_inner.MoveNext());
+                            }}
+
+                            public T Current
+                            {{
+                                get {{ return _inner.Current; }}
+                            }}
+
+                            object System.Data.Entity.Infrastructure.IDbAsyncEnumerator.Current
+                            {{
+                                get {{ return Current; }}
+                            }}
+                            ");
+                    }
+                    _output?.WriteLine("}");
+
+
+                    if (Settings.ElementsToGenerate.HasFlag(Elements.Context) && !Settings.GenerateSeparateFiles)
+                        _output?.WriteLine("#endregion"); // line 1000
+                    #endregion
+                }
+                #endregion Fake Database context (Line 533 to 1002)
+
+                Console.WriteLine("POCO classes...");
+                #region POCO classes (Line 1003 to 1112)
+                if (Settings.ElementsToGenerate.HasFlag(Elements.Poco))
+                {
+                    if (!Settings.GenerateSeparateFiles)
+                        _output?.WriteLine("#region POCO classes\n"); // line 1005
+                    foreach (Table tbl in Settings.Tables.Where(t => !t.IsMapping).OrderBy(x => x.NameHumanCase))
+                    {
+                        if (Settings.GenerateSeparateFiles)
+                            StartNewFile(tbl.NameHumanCaseWithSuffix() + Settings.FileExtension);
+                        if (!tbl.HasPrimaryKey)
+                        {
+                            _output?.WriteLine($"// The table '{tbl.Name}' is not usable by entity framework because it");
+                            _output?.WriteLine($"// does not have a primary key. It is listed here for completeness.");
+                        }
+                        if (Settings.IncludeComments != CommentsStyle.None)
+                            _output?.WriteLine($"// {tbl.Name}");
+                        WritePocoClassExtendedComments(_output, tbl); // Line 1019
+                        WritePocoClassAttributes(_output, tbl); // Line 1020
+                        if (Settings.IncludeCodeGeneratedAttribute)
+                            _output?.WriteLine(CodeGeneratedAttribute);
+                        _output?.Write($"{ Settings.EntityClassesModifiers } class {tbl.NameHumanCaseWithSuffix()}");
+                        if (this.WritePocoBaseClasses != null)
+                            this.WritePocoBaseClasses(_output, tbl);
+                        _output?.WriteLine();
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            this.WritePocoBaseClassBody(_output, tbl); // Line 1025
+                            foreach (Column col in tbl.Columns.OrderBy(x => x.Ordinal).Where(x => !x.Hidden))
+                                this.WritePocoColumn(_output, col);
+                            Console.WriteLine("ReverseNavigationProperty...");
+                            #region ReverseNavigationProperty (Line 1032 to 1055)
+                            if (tbl.ReverseNavigationProperty.Count() > 0)
+                            {
+                                _output?.WriteLine("");
+                                if (Settings.IncludeComments != CommentsStyle.None)
+                                    _output?.WriteLine($"// Reverse navigation\n");
+                                foreach (var s in tbl.ReverseNavigationProperty.OrderBy(x => x.Definition))
+                                {
+                                    if (Settings.IncludeComments != CommentsStyle.None)
+                                    {
+                                        _output?.WriteLine($"/// <summary>");
+                                        _output?.WriteLine($"/// {s.Comments ?? "" }");
+                                        _output?.WriteLine($"/// </summary>");
+                                    }
+                                    foreach (var rnpda in Settings.AdditionalReverseNavigationsDataAnnotations)
+                                        _output?.WriteLine($"[{rnpda }]");
+                                    if (s.AdditionalDataAnnotations != null)
+                                    {
+                                        foreach (var fkda in s.AdditionalDataAnnotations)
+                                        {
+                                            _output?.WriteLine($"[{fkda }]");
+                                        }
+                                    }
+                                    _output?.WriteLine($"{s.Definition }");
+                                }
+                            }
+                            #endregion ReverseNavigationProperty (Line 1032 to 1055)
+
+                            Console.WriteLine("ForeignKeys...");
+                            #region ForeignKeys - (Line 1056 to 1077)
+                            if (tbl.HasForeignKey)
+                            {
+                                if (Settings.IncludeComments != CommentsStyle.None && tbl.Columns.SelectMany(x => x.EntityFk).Any())
+                                    _output?.WriteLine("// Foreign keys");
+                                foreach (var entityFk in tbl.Columns.SelectMany(x => x.EntityFk).OrderBy(o => o.Definition))
+                                {
+                                    if (Settings.IncludeComments != CommentsStyle.None)
+                                    {
+                                        _output?.WriteLine($"/// <summary>");
+                                        _output?.WriteLine($"/// {entityFk.Comments ?? "" }");
+                                        _output?.WriteLine($"/// </summary>");
+                                    }
+                                    foreach (var fkda in Settings.AdditionalForeignKeysDataAnnotations)
+                                        _output?.WriteLine($"[{fkda }]");
+                                    if (entityFk.AdditionalDataAnnotations != null)
+                                    {
+                                        foreach (var fkda in entityFk.AdditionalDataAnnotations)
+                                        {
+                                            _output?.WriteLine($"[{fkda }]");
+                                        }
+                                    }
+                                    _output?.WriteLine($"{entityFk.Definition }");
+                                }
+                            }
+                            #endregion ForeignKeys - (Line 1056 to 1077)
+
+                            Console.WriteLine("UsePropertyInitializers...");
+                            #region POCO UsePropertyInitializers (Line 1079 to 1104)
+                            if (!Settings.UsePropertyInitializers)
+                            {
+                                if (tbl.Columns.Where(c => c.Default != string.Empty && !c.Hidden).Count() > 0 || tbl.ReverseNavigationCtor.Count() > 0 || Settings.EntityClassesArePartial())
+                                {
+                                    _output?.WriteLine($"public {tbl.NameHumanCaseWithSuffix()}()");
+                                    _output?.WriteLine("{");
+                                    using (_output?.WithIndent())
+                                    {
+                                        foreach (var col in tbl.Columns.OrderBy(x => x.Ordinal).Where(c => c.Default != string.Empty && !c.Hidden))
+                                            _output?.WriteLine($"{col.NameHumanCase } = {col.Default };");
+                                        foreach (string s in tbl.ReverseNavigationCtor)
+                                            _output?.WriteLine(s);
+                                        if (Settings.EntityClassesArePartial())
+                                            _output?.WriteLine("InitializePartial();");
+                                    }
+                                    _output?.WriteLine("}");
+                                    if (Settings.EntityClassesArePartial())
+                                        _output?.WriteLine("partial void InitializePartial();");
+                                }
+                            }
+                            #endregion POCO UsePropertyInitializers (Line 1079 to 1104)
+
+
+                        }
+                        _output?.WriteLine("}");
+                    }
+                }
+                if (Settings.ElementsToGenerate.HasFlag(Elements.Poco) && !Settings.GenerateSeparateFiles)
+                    _output?.WriteLine("#endregion\n"); // line 1110
+                #endregion POCO classes (Line 1003 to 1112)
+
+                Console.WriteLine("POCO Configuration...");
+                #region POCO Configuration (Line 1113 to 1178)
+                if (Settings.ElementsToGenerate.HasFlag(Elements.PocoConfiguration))
+                {
+                    if (!Settings.GenerateSeparateFiles)
+                        _output?.WriteLine("#region POCO Configuration\n"); // line 1115
+                    foreach (var tbl in Settings.Tables.Where(t => !t.IsMapping && t.HasPrimaryKey).OrderBy(x => x.NameHumanCase))
+                    {
+                        if (Settings.GenerateSeparateFiles)
+                            StartNewFile(tbl.NameHumanCaseWithSuffix() + Settings.ConfigurationClassName + Settings.FileExtension);
+                        if (Settings.IncludeComments != CommentsStyle.None)
+                            _output?.WriteLine($"// {tbl.Name}");
+                        if (Settings.IncludeCodeGeneratedAttribute)
+                            _output?.WriteLine(CodeGeneratedAttribute);
+                        _output?.WriteLine($"{ Settings.ConfigurationClassesModifiers } class {tbl.NameHumanCaseWithSuffix() + Settings.ConfigurationClassName} : System.Data.Entity.ModelConfiguration.EntityTypeConfiguration<{tbl.NameHumanCaseWithSuffix()}>");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            _output?.WriteLine($"public {tbl.NameHumanCaseWithSuffix() + Settings.ConfigurationClassName}() : this(\"{ tbl.Schema ?? ""}\")");
+                            _output?.WriteLine("{");
+                            _output?.WriteLine("}");
+
+                            _output?.WriteLine($"public {tbl.NameHumanCaseWithSuffix() + Settings.ConfigurationClassName}(string schema)");
+                            _output?.WriteLine("{");
+                            using (_output?.WithIndent())
+                            {
+                                if (!Settings.UseDataAnnotations)
+                                {
+                                    if (!string.IsNullOrEmpty(tbl.Schema))
+                                        _output?.WriteLine($"ToTable(\"{ tbl.Name}\", schema);");
+                                    else
+                                        _output?.WriteLine($"ToTable(\"{ tbl.Name}\");");
+                                }
+                                if (!Settings.UseDataAnnotations)
+                                    _output?.WriteLine($"HasKey({tbl.PrimaryKeyNameHumanCase()});\n");
+                                foreach (var col in tbl.Columns.Where(x => !x.Hidden && !string.IsNullOrEmpty(x.Config)).OrderBy(x => x.Ordinal))
+                                    _output?.WriteLine(col.Config);
+
+                                Console.WriteLine("ForeignKeys 1151 ...");
+                                #region ForeignKeys (Line 1151 to 1160)
+                                if (tbl.HasForeignKey)
+                                {
+                                    if (Settings.IncludeComments != CommentsStyle.None && tbl.Columns.SelectMany(x => x.ConfigFk).Any())
+                                        _output?.WriteLine($"// Foreign keys");
+                                    foreach (var configFk in tbl.Columns.SelectMany(x => x.ConfigFk).OrderBy(o => o))
+                                    {
+                                        _output?.WriteLine(configFk);
+                                    }
+                                }
+                                #endregion ForeignKeys (Line 1151 to 1160)
+                                foreach (string s in tbl.MappingConfiguration)
+                                    _output?.WriteLine(s);
+                                if (Settings.DbContextClassIsPartial())
+                                    _output?.WriteLine("InitializePartial();");
+                            }
+                            _output?.WriteLine("}");
+                            if (Settings.EntityClassesArePartial())
+                                _output?.WriteLine("partial void InitializePartial();");
+                        }
+                        _output?.WriteLine("}"); // Line 1172
+                    }
+                } // Line 1174
+                if (Settings.ElementsToGenerate.HasFlag(Elements.PocoConfiguration) && !Settings.GenerateSeparateFiles)
+                    _output?.WriteLine("#endregion\n"); // line 1176
+                #endregion POCO Configuration (Line 1113 to 1178)
+
+                Console.WriteLine("Stored procedure return models...");
+                #region Stored procedure return models (Line 1179 to 1124)
+                if (Settings.StoredProcs.Any() && Settings.ElementsToGenerate.HasFlag(Elements.Poco))
+                {
+                    if (!Settings.GenerateSeparateFiles)
+                        _output?.WriteLine("#region Stored procedure return models\n"); // line 1181
+                    foreach (var sp in Settings.StoredProcs.Where(x => x.ReturnModels.Count > 0 && x.ReturnModels.Any(returnColumns => returnColumns.Any()) && !Settings.StoredProcedureReturnTypes.ContainsKey(x.NameHumanCase) && !Settings.StoredProcedureReturnTypes.ContainsKey(x.Name)).OrderBy(x => x.NameHumanCase))
+                    {
+                        string spReturnClassName = WriteStoredProcReturnModelName(sp);
+                        if (Settings.GenerateSeparateFiles)
+                            StartNewFile(spReturnClassName + Settings.FileExtension);
+                        if (Settings.IncludeCodeGeneratedAttribute)
+                            _output?.WriteLine(CodeGeneratedAttribute);
+                        _output?.WriteLine($"{Settings.ResultClassModifiers } class { spReturnClassName }");
+                        _output?.WriteLine("{");
+                        using (_output?.WithIndent())
+                        {
+                            var returnModelCount = sp.ReturnModels.Count;
+                            if (returnModelCount < 2)
+                            {
+                                foreach (var returnColumn in sp.ReturnModels.First())
+                                    _output?.WriteLine(WriteStoredProcReturnColumn(returnColumn));
+                            }
+                            else
+                            {
+                                int model = 0;
+                                foreach (var returnModel in sp.ReturnModels)
+                                {
+                                    model++;
+                                    _output?.WriteLine($"public class ResultSetModel{ model }");
+                                    _output?.WriteLine("{");
+                                    using (_output?.WithIndent())
+                                    {
+                                        foreach (var returnColumn in returnModel)
+                                            _output?.WriteLine(WriteStoredProcReturnColumn(returnColumn));
+                                    }
+                                    _output?.WriteLine("}");
+                                    _output?.WriteLine($"public System.Collections.Generic.List<ResultSetModel{ model }> ResultSet{ model };");
+                                }
+
+                            }
+
+                        }
+                        _output?.WriteLine("}");
+                        _output?.WriteLine();
+                    }
+                }
+                if (Settings.StoredProcs.Any() && Settings.ElementsToGenerate.HasFlag(Elements.Poco) && !Settings.GenerateSeparateFiles)
+                    _output?.WriteLine("#endregion\n"); // line 1222
+                #endregion Stored procedure return models (Line 1179 to 1124)
+
+                FinishCurrentFile();
+            }
+            //_output?.WriteLine("}"); // this is in FinishCurrentFile()
+            #endregion Namespace / whole file (Line 31 to 1226)
+            //_output?.WriteLine("// </auto-generated>"); // this is in FinishCurrentFile()
+
+            #endregion
+            #endregion
+        }
+
+        #region All this code mostly came from Simon Hughes T4 templates (with minor adjustments) - EF.Reverse.POCO.Core.ttinclude - see https://github.com/sjh37/EntityFramework-Reverse-POCO-Code-First-Generator
 
         [Flags]
         public enum CommentsStyle
@@ -331,7 +2342,7 @@ namespace EntityFramework_Scripty_Templates
 
         private void LogToOutput(string message)
         {
-            this._output.WriteLine(message);
+            this._output?.WriteLine(message);
         }
 
 
@@ -4016,17 +6027,16 @@ SELECT  SERVERPROPERTY('Edition') AS Edition,
 
         public static readonly Func<StoredProcedureParameter, string> WriteStoredProcSqlParameterName = p => p.NameHumanCase + "Param";
 
-        public static readonly Func<StoredProcedure, bool, string> WriteStoredProcFunctionDeclareSqlParameter = (sp, includeProcResult) =>
+        public static readonly Action<Scripty.Core.Output.OutputFile, StoredProcedure, bool> WriteStoredProcFunctionDeclareSqlParameter = (o, sp, includeProcResult) =>
         {
-            var sb = new StringBuilder();
             foreach (var p in sp.Parameters.OrderBy(x => x.Ordinal))
             {
                 var isNullable = !NotNullable.Contains(p.PropertyType.ToLower());
                 var getValueOrDefault = isNullable ? ".GetValueOrDefault()" : string.Empty;
                 var isGeography = p.PropertyType == "System.Data.Entity.Spatial.DbGeography";
 
-                sb.AppendLine(
-                    string.Format("            var {0} = new System.Data.SqlClient.SqlParameter", WriteStoredProcSqlParameterName(p))
+                o?.WriteLine(
+                    string.Format("var {0} = new System.Data.SqlClient.SqlParameter", WriteStoredProcSqlParameterName(p))
                     + string.Format(" {{ ParameterName = \"{0}\", ", p.Name)
                     + (isGeography ? "UdtTypeName = \"geography\"" : string.Format("SqlDbType = System.Data.SqlDbType.{0}", p.SqlDbType))
                     + ", Direction = System.Data.ParameterDirection."
@@ -4043,16 +6053,15 @@ SELECT  SERVERPROPERTY('Edition') AS Edition,
 
                 if (p.Mode == StoredProcedureParameterMode.In)
                 {
-                    sb.AppendFormat(
+                    o?.WriteLine(
                         isNullable
-                            ? "            if (!{0}.HasValue){1}                {0}Param.Value = System.DBNull.Value;{1}{1}"
-                            : "            if ({0}Param.Value == null){1}                {0}Param.Value = System.DBNull.Value;{1}{1}",
+                            ? "if (!{0}.HasValue){1}                {0}Param.Value = System.DBNull.Value;{1}"
+                            : "if ({0}Param.Value == null){1}                {0}Param.Value = System.DBNull.Value;{1}",
                         p.NameHumanCase, Environment.NewLine);
                 }
             }
             if (includeProcResult && sp.ReturnModels.Count < 2)
-                sb.AppendLine("            var procResultParam = new System.Data.SqlClient.SqlParameter { ParameterName = \"@procResult\", SqlDbType = System.Data.SqlDbType.Int, Direction = System.Data.ParameterDirection.Output };");
-            return sb.ToString();
+                o?.WriteLine("var procResultParam = new System.Data.SqlClient.SqlParameter { ParameterName = \"@procResult\", SqlDbType = System.Data.SqlDbType.Int, Direction = System.Data.ParameterDirection.Output };");
         };
 
         public static readonly Func<StoredProcedure, string> WriteTableValuedFunctionDeclareSqlParameter = sp =>
@@ -4060,7 +6069,7 @@ SELECT  SERVERPROPERTY('Edition') AS Edition,
             var sb = new StringBuilder();
             foreach (var p in sp.Parameters.OrderBy(x => x.Ordinal))
             {
-                sb.AppendLine(string.Format("            var {0}Param = new System.Data.Entity.Core.Objects.ObjectParameter(\"{1}\", typeof({2})) {{ Value = (object){3} }};",
+                sb.AppendLine(string.Format("var {0}Param = new System.Data.Entity.Core.Objects.ObjectParameter(\"{1}\", typeof({2})) {{ Value = (object){3} }};",
                     p.NameHumanCase,
                     p.Name.Substring(1),
                     p.PropertyType,
@@ -4097,25 +6106,23 @@ SELECT  SERVERPROPERTY('Edition') AS Edition,
             return sb.ToString().Substring(0, sb.Length - 2);
         };
 
-        public static readonly Func<StoredProcedure, bool, string> WriteStoredProcFunctionSetSqlParameters = (sp, isFake) =>
+        public static readonly Action<Scripty.Core.Output.OutputFile, StoredProcedure, bool> WriteStoredProcFunctionSetSqlParameters = (o, sp, isFake) =>
         {
-            var sb = new StringBuilder();
             foreach (var p in sp.Parameters.Where(x => x.Mode != StoredProcedureParameterMode.In).OrderBy(x => x.Ordinal))
             {
                 var Default = string.Format("default({0})", p.PropertyType);
                 var notNullable = NotNullable.Contains(p.PropertyType.ToLower());
 
                 if (isFake)
-                    sb.AppendLine(string.Format("            {0} = {1};", p.NameHumanCase, Default));
+                    o?.WriteLine(string.Format("{0} = {1};", p.NameHumanCase, Default));
                 else
                 {
-                    sb.AppendLine(string.Format("            if (IsSqlParameterNull({0}Param))", p.NameHumanCase));
-                    sb.AppendLine(string.Format("                {0} = {1};", p.NameHumanCase, notNullable ? Default : "null"));
-                    sb.AppendLine("            else");
-                    sb.AppendLine(string.Format("                {0} = ({1}) {2}Param.Value;", p.NameHumanCase, p.PropertyType, p.NameHumanCase));
+                    o?.WriteLine(string.Format("if (IsSqlParameterNull({0}Param))", p.NameHumanCase));
+                    o?.WriteLine(string.Format("    {0} = {1};", p.NameHumanCase, notNullable ? Default : "null"));
+                    o?.WriteLine("else");
+                    o?.WriteLine(string.Format("    {0} = ({1}) {2}Param.Value;", p.NameHumanCase, p.PropertyType, p.NameHumanCase));
                 }
             }
-            return sb.ToString();
         };
 
         public static readonly Func<StoredProcedure, string> WriteStoredProcReturnModelName = sp =>
@@ -4231,14 +6238,103 @@ SELECT  SERVERPROPERTY('Edition') AS Edition,
         #endregion
 
 
+
+
         public async Task OutputProjectStructure()
         {
-            // If you embed this template into your project, you can change this to automatically add the generated file to your csproj and set it as Compilable code
-            _context.Output.BuildAction = Scripty.Core.Output.BuildAction.GenerateOnly;
-            //_context.Output.BuildAction = Scripty.Core.Output.BuildAction.Compile;
-
-            _context.Output.WriteLine($"//I am a text file generated by a scripty template");
+            this.Configure();
+            this.Generate();
         }
+
+        #region StartNewFile / FinishCurrentFile - with header and footer
+        void StartNewFile(string path)
+        {
+            FinishCurrentFile();
+            if (_context != null)
+                this._output = _context.Output[path]; // default file
+            if (_output != null)
+            {
+                // If you embed this template into your project, you can change this to automatically add the generated file to your csproj and set it as Compilable code
+                _output.BuildAction = Scripty.Core.Output.BuildAction.GenerateOnly;
+                //_output?.BuildAction = Scripty.Core.Output.BuildAction.Compile;
+            }
+            WriteTextBlock(_output, $@"
+                // <auto-generated>
+                // ReSharper disable ConvertPropertyToExpressionBody
+                // ReSharper disable DoNotCallOverridableMethodsInConstructor
+                // ReSharper disable EmptyNamespace
+                // ReSharper disable InconsistentNaming
+                // ReSharper disable PartialMethodWithSinglePart
+                // ReSharper disable PartialTypeWithSinglePart
+                // ReSharper disable RedundantNameQualifier
+                // ReSharper disable RedundantOverridenMember
+                // ReSharper disable UseNameofExpression
+                // TargetFrameworkVersion = { Settings.TargetFrameworkVersion }
+                #pragma warning disable 1591    //  Ignore ""Missing XML Comment"" warning
+                    ");
+
+            if (Settings.ElementsToGenerate.HasFlag(Elements.Poco) || Settings.ElementsToGenerate.HasFlag(Elements.PocoConfiguration)) // Line 20
+            {
+                if (Settings.UseDataAnnotations || Settings.UseDataAnnotationsWithFluent)
+                {
+                    _output?.WriteLine("using System.ComponentModel.DataAnnotations;");
+                }
+                if (Settings.UseDataAnnotations)
+                {
+                    _output?.WriteLine("using System.ComponentModel.DataAnnotations.Schema;");
+                }
+            }
+
+            _output?.WriteLine($"namespace { Settings.Namespace }"); // Line 31 // this is in StartNewFile()
+            _output?.WriteLine("{"); // this is in StartNewFile()
+            if (_output != null)
+    	        _output.IndentLevel++;
+
+
+
+        }
+        void FinishCurrentFile()
+        {
+            if (this._output == null)
+                return;
+            if (_output != null)
+            _output.IndentLevel--;
+            _output?.WriteLine("}");
+            _output?.WriteLine("// </auto-generated>");
+        }
+
+        #endregion
+
+        #region Template Helpers
+        /// <summary>
+        /// Given a text block (multiple lines), this removes the left padding of the block, by calculating the minimum number of spaces which happens in EVERY line.
+        /// Then, this method writes one by one each line, which in case will respect the current indent.
+        /// </summary>
+        /// <param name="output"></param>
+        /// <param name="str"></param>
+        /// <returns></returns>
+        public static void WriteTextBlock(Scripty.Core.Output.OutputFile output, string str)
+        {
+            //Console.WriteLine("[" + str + "]");
+
+            var nonEmptyLines = str.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries).Where(line => line.TrimEnd().Length > 0);
+            int minNumberOfSpaces = nonEmptyLines.Select(nonEmptyLine => nonEmptyLine.Length - nonEmptyLine.TrimStart().Length).Min();
+            var allLines = str.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+            for (int i = 0; i < allLines.Length; i++)
+            {
+                string line = allLines[i];
+                // to make templates more readable, let's assume that each block may have one empty line before and one empty line after it - ignore those empty lines
+                if (i == 0 && line.TrimStart() == string.Empty)
+                    continue;
+                if (i == allLines.Length - 1 && line.TrimEnd() == string.Empty)
+                    continue;
+
+                //Console.WriteLine("[" + line.Substring(Math.Min(line.Length, minNumberOfSpaces)).TrimEnd() + "]");
+                output?.WriteLine(line.Substring(Math.Min(line.Length, minNumberOfSpaces)).TrimEnd());
+            }
+        }
+
+        #endregion
 
     }
 }
