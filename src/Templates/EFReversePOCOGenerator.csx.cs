@@ -319,6 +319,7 @@ namespace EntityFramework_Scripty_Templates
             // As long as the type can be mapped to your new type, all is well.
             //Settings.EnumDefinitions.Add(new EnumDefinition { Schema = "dbo", Table = "match_table_name", Column = "match_column_name", EnumType = "name_of_enum" });
             //Settings.EnumDefinitions.Add(new EnumDefinition { Schema = "dbo", Table = "OrderHeader", Column = "OrderStatus", EnumType = "OrderStatusType" }); // This will replace OrderHeader.OrderStatus type to be an OrderStatusType enum
+            //Settings.EnumDefinitions.Add(new EnumDefinition { Schema = "dbo", Table = "*", Column = "OrderStatus", EnumType = "OrderStatusType" }); // This will replace any table *.OrderStatus type to be an OrderStatusType enum
 
             // Use the following function if you need to apply additional modifications to a column
             // eg. normalise names etc.
@@ -352,7 +353,7 @@ namespace EntityFramework_Scripty_Templates
                 // Perform Enum property type replacement
                 var enumDefinition = Settings.EnumDefinitions.FirstOrDefault(e =>
                     (e.Schema.Equals(table.Schema, StringComparison.InvariantCultureIgnoreCase)) &&
-                    (e.Table.Equals(table.Name, StringComparison.InvariantCultureIgnoreCase) || e.Table.Equals(table.NameHumanCase, StringComparison.InvariantCultureIgnoreCase)) &&
+                    (e.Table == "*" || e.Table.Equals(table.Name, StringComparison.InvariantCultureIgnoreCase) || e.Table.Equals(table.NameHumanCase, StringComparison.InvariantCultureIgnoreCase)) &&
                     (e.Column.Equals(column.Name, StringComparison.InvariantCultureIgnoreCase) || e.Column.Equals(column.NameHumanCase, StringComparison.InvariantCultureIgnoreCase)));
 
                 if (enumDefinition != null)
@@ -954,15 +955,18 @@ namespace EntityFramework_Scripty_Templates
                         }
                         _output?.WriteLine("}");
 
-                        _output?.WriteLine("");
-                        _output?.WriteLine($"public {Settings.DbContextName}(System.Data.Entity.Core.Objects.ObjectContext objectContext, bool dbContextOwnsObjectContext) : base(objectContext, dbContextOwnsObjectContext)");
-                        _output?.WriteLine("{");
-                        using (_output?.WithIndent())
+                        if (!Settings.DbContextBaseClass.Contains("IdentityDbContext"))
                         {
-                            if (Settings.DbContextClassIsPartial())
-                                _output?.WriteLine("InitializePartial();");
+                            _output?.WriteLine("");
+                            _output?.WriteLine($"public {Settings.DbContextName}(System.Data.Entity.Core.Objects.ObjectContext objectContext, bool dbContextOwnsObjectContext) : base(objectContext, dbContextOwnsObjectContext)");
+                            _output?.WriteLine("{");
+                            using (_output?.WithIndent())
+                            {
+                                if (Settings.DbContextClassIsPartial())
+                                    _output?.WriteLine("InitializePartial();");
+                            }
+                            _output?.WriteLine("}");
                         }
-                        _output?.WriteLine("}");
 
                         _output?.WriteLine("");
                         _output?.WriteLine($"protected override void Dispose(bool disposing)");
@@ -5681,7 +5685,7 @@ SELECT  SERVERPROPERTY('Edition') AS Edition,
 
             public string GetUniqueColumnName(string tableNameHumanCase, ForeignKey foreignKey, bool checkForFkNameClashes, bool makeSingular, Relationship relationship)
             {
-                var addReverseNavigationUniquePropName = (checkForFkNameClashes || Name == foreignKey.FkTableName || (Name == foreignKey.PkTableName && foreignKey.IncludeReverseNavigation));
+                var addReverseNavigationUniquePropName = checkForFkNameClashes && (Name == foreignKey.FkTableName || (Name == foreignKey.PkTableName && foreignKey.IncludeReverseNavigation));
                 if (ReverseNavigationUniquePropName.Count == 0)
                 {
                     ReverseNavigationUniquePropName.Add(NameHumanCase);
@@ -5700,7 +5704,7 @@ SELECT  SERVERPROPERTY('Edition') AS Edition,
                 string col;
                 if (!ReverseNavigationUniquePropNameClashes.Contains(name) && !ReverseNavigationUniquePropName.Contains(name))
                 {
-                    if (addReverseNavigationUniquePropName)
+                    if (addReverseNavigationUniquePropName || !checkForFkNameClashes)
                     {
                         ReverseNavigationUniquePropName.Add(name);
                     }
@@ -5721,7 +5725,7 @@ SELECT  SERVERPROPERTY('Edition') AS Edition,
                         if (!ReverseNavigationUniquePropNameClashes.Contains(col) &&
                             !ReverseNavigationUniquePropName.Contains(col))
                         {
-                            if (addReverseNavigationUniquePropName)
+                            if (addReverseNavigationUniquePropName || !checkForFkNameClashes)
                             {
                                 ReverseNavigationUniquePropName.Add(col);
                             }
@@ -5739,7 +5743,7 @@ SELECT  SERVERPROPERTY('Edition') AS Edition,
                     if (!ReverseNavigationUniquePropNameClashes.Contains(col) &&
                         !ReverseNavigationUniquePropName.Contains(col))
                     {
-                        if (addReverseNavigationUniquePropName)
+                        if (addReverseNavigationUniquePropName || !checkForFkNameClashes)
                         {
                             ReverseNavigationUniquePropName.Add(col);
                         }
@@ -5755,7 +5759,7 @@ SELECT  SERVERPROPERTY('Edition') AS Edition,
 
                 if (!ReverseNavigationUniquePropNameClashes.Contains(col) && !ReverseNavigationUniquePropName.Contains(col))
                 {
-                    if (addReverseNavigationUniquePropName)
+                    if (addReverseNavigationUniquePropName || !checkForFkNameClashes)
                     {
                         ReverseNavigationUniquePropName.Add(col);
                     }
@@ -5771,7 +5775,7 @@ SELECT  SERVERPROPERTY('Edition') AS Edition,
                     if (ReverseNavigationUniquePropName.Contains(col))
                         continue;
 
-                    if (addReverseNavigationUniquePropName)
+                    if (addReverseNavigationUniquePropName || !checkForFkNameClashes)
                     {
                         ReverseNavigationUniquePropName.Add(col);
                     }
